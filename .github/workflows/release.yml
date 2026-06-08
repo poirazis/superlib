@@ -54,7 +54,7 @@ jobs:
         run: bun run prepack
 
       - name: Setup Node for publish
-        if: steps.version.outputs.bumped == 'true'
+        if: steps.version.outputs.bumped == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: 22
