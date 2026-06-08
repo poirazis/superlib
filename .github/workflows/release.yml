@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.repository }}
@@ -24,6 +25,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -58,7 +61,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Publish to npm
-        if: steps.version.outputs.bumped == 'true'
+        if: steps.version.outputs.bumped == 'true' || github.event_name == 'workflow_dispatch'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish

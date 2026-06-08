@@ -1,6 +1,7 @@
 {
 	"name": "@poirazis/superlib",
 	"version": "0.0.4",
+	"packageManager": "bun@1.4.0",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && npm run prepack",
