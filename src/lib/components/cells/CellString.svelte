@@ -85,7 +85,7 @@
 			}
 		},
 		copyable: {
-			copy() {
+			click() {
 				navigator.clipboard
 					.writeText(value)
 					.then(() => {
@@ -97,6 +97,12 @@
 					.catch((err) => {
 						console.error('Failed to copy to clipboard:', err);
 					});
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -148,7 +154,7 @@
 					}, debounceDelay);
 				}
 			},
-			handleKeyboard(e) {
+			keydown(e) {
 				if (e.key === 'Enter' && !e.shiftKey) {
 					this.submit();
 				}
@@ -238,7 +244,7 @@
 				value={localValue}
 				on:input={cellState.debounce}
 				on:focusout={cellState.focusout}
-				on:keydown={cellState.handleKeyboard}
+				on:keydown={cellState.keydown}
 			></textarea>
 		{:else}
 			<input
@@ -252,7 +258,7 @@
 				style:text-align={cellOptions.align}
 				on:input={cellState.debounce}
 				on:focusout={cellState.focusout}
-				on:keydown={cellState.handleKeyboard}
+				on:keydown={cellState.keydown}
 			/>
 		{/if}
 	{/key}

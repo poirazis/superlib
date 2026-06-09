@@ -142,8 +142,14 @@
 			_enter() {
 				localValue = normalizedValue;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(String(displayValue ?? ''), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -201,7 +207,7 @@
 					}, debounceDelay);
 				}
 			},
-			handleKeyboard(e) {
+			keydown(e) {
 				if (e.key === 'Enter' && !multiline) {
 					this.submit();
 				}
@@ -289,7 +295,7 @@
 			value={$cellState === 'editing' ? editValue : displayValue}
 			on:input={cellState.debounce}
 			on:focusout={cellState.focusout}
-			on:keydown={cellState.handleKeyboard}
+			on:keydown={cellState.keydown}
 		></textarea>
 	{:else}
 		<input
@@ -302,7 +308,7 @@
 			style:text-align={config.align}
 			on:input={cellState.debounce}
 			on:focusout={cellState.focusout}
-			on:keydown={cellState.handleKeyboard}
+			on:keydown={cellState.keydown}
 		/>
 	{/if}
 </BaseCell>

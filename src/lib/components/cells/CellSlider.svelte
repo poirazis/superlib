@@ -191,7 +191,7 @@
 			}
 		},
 		copyable: {
-			copy() {
+			click() {
 				navigator.clipboard
 					.writeText(displayText)
 					.then(() => {
@@ -203,6 +203,12 @@
 					.catch((err) => {
 						console.error('Failed to copy to clipboard:', err);
 					});
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {

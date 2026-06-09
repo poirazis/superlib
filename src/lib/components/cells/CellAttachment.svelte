@@ -103,9 +103,6 @@
 			},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
-			},
-			copy() {
-				if (!readonly && !disabled) return 'editing';
 			}
 		},
 		readonly: {
@@ -117,8 +114,14 @@
 			_enter() {
 				open = false;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(attachmentCopyText(localvalue), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -130,18 +133,25 @@
 			_enter() {
 				originalValue = value;
 				localvalue = normalizeAttachments(value, multi);
-				open = true;
+				open = false;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			toggle() {
+			click() {
 				open = !open;
 			},
-			copy() {
-				open = !open;
+			keydown(e) {
+				if (e.key === ' ' || e.key === 'Enter') {
+					e.preventDefault();
+					this.click();
+				}
+
+				if (e.key === 'Escape') {
+					this.cancel();
+				}
 			},
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
@@ -193,6 +203,7 @@
 		if (autofocus) {
 			setTimeout(() => {
 				cellState.focus();
+				cellState.click?.();
 			}, 30);
 		}
 	});
@@ -214,7 +225,7 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-	onfocusout={cellState.focusout}
+
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
@@ -225,7 +236,6 @@
 	<div
 		class="attachment-display"
 		class:placeholder={showPlaceholder}
-		on:click={cellState.toggle}
 	>
 		{#if localvalue.length || inEdit}
 			<div class="items">

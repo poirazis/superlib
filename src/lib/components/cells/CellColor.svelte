@@ -229,9 +229,6 @@
 			},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
-			},
-			copy() {
-				if (!readonly && !disabled) return 'editing';
 			}
 		},
 		readonly: {
@@ -243,8 +240,14 @@
 			_enter() {
 				open = false;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(String(value ?? ''), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -256,21 +259,25 @@
 			_enter() {
 				originalValue = value;
 				customValue = getCustomValue(value) ?? '';
-				open = true;
+				open = false;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			copy() {
+			click() {
 				open = !open;
 			},
-			handleKeyboard(e) {
-				if (e.keyCode == 32) {
+			keydown(e) {
+				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
 					open = !open;
+				}
+
+				if (e.key === 'Escape') {
+					this.cancel();
 				}
 			},
 			focusout(e) {
@@ -326,7 +333,7 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-	onfocusout={cellState.focusout}
+
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>

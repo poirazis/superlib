@@ -162,7 +162,7 @@
 		inEdit ? formattedValue || placeholder : value ? formattedValue || placeholder : placeholder
 	);
 
-	let showPlaceholder = $derived(!formattedValue && !value);
+	let showPlaceholder = $derived(!formattedValue);
 
 	export const cellState = fsm('view', {
 		'*': {
@@ -177,9 +177,6 @@
 			},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
-			},
-			copy() {
-				if (!readonly && !disabled) return 'editing';
 			}
 		},
 		readonly: {
@@ -193,7 +190,7 @@
 				open = false;
 				selection = false;
 			},
-			copy() {
+			click() {
 				const textToCopy = formattedValue || String(value ?? '');
 				navigator.clipboard
 					.writeText(textToCopy)
@@ -206,6 +203,12 @@
 					.catch((err) => {
 						console.error('Failed to copy to clipboard:', err);
 					});
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -219,27 +222,31 @@
 				originalValue = value;
 				innerDate = parseValueToDate(value);
 				syncTimeValue();
-				open = true;
+				open = false;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			copy() {
+			click() {
 				open = !open;
 			},
-			handleKeyboard(e) {
-				if (e.keyCode == 32) {
+			keydown(e) {
+				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
 					open = !open;
 				}
 
-				if (e.code == 'Delete' || e.code == 'Backspace') {
+				if (e.code === 'Delete' || e.code === 'Backspace') {
 					e.stopPropagation();
 					e.preventDefault();
 					dispatch('change', null);
+				}
+
+				if (e.key === 'Escape') {
+					this.cancel();
 				}
 			},
 			focusout(e) {
@@ -338,6 +345,7 @@
 		if (autofocus) {
 			setTimeout(() => {
 				cellState.focus();
+				cellState.click?.();
 			}, 30);
 		}
 	});
@@ -371,14 +379,18 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-	onfocusout={cellState.focusout}
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
 	{/if}
 
-	<div class="datetime-display" class:placeholder={showPlaceholder} style:justify-content={align}>
-		<span>{displayText}</span>
+	<div
+		class="datetime-display"
+		class:placeholder={showPlaceholder}
+		class:inline={baseRole === 'inline'}
+		style:justify-content={align}
+	>
+		<span class:placeholder={showPlaceholder}>{displayText}</span>
 		{#if inEdit}
 			<i class="ph ph-calendar-blank calendar-icon"></i>
 		{/if}
@@ -433,6 +445,36 @@
 </PickerPopover>
 
 <style>
+	.datetime-display {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex: 1 1 auto;
+		min-width: 0;
+		height: 100%;
+		padding: 0.25rem 0.75rem;
+		box-sizing: border-box;
+		cursor: inherit;
+	}
+
+	.datetime-display.inline {
+		padding: 0.25rem;
+	}
+
+	.datetime-display.placeholder,
+	.datetime-display.placeholder > span,
+	.datetime-display > span.placeholder {
+		font-style: italic !important;
+		color: var(--spectrum-global-color-gray-500) !important;
+	}
+
+	.calendar-icon {
+		font-size: 16px;
+		flex-shrink: 0;
+		margin-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
 	.datetime-picker-container {
 		display: contents;
 		flex-direction: column;

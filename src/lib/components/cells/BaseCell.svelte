@@ -14,9 +14,6 @@
 		color?: string;
 		background?: string;
 		styles?: Record<string, any>; // for use with stylable action
-		// event handlers (attach to root)
-		onfocusin?: (e?: any) => void;
-		onfocusout?: (e?: any) => void;
 		tabindex?: number;
 		popupOpen?: boolean;
 		root?: HTMLElement | null;
@@ -40,8 +37,6 @@
 		popupOpen = false,
 		color,
 		background,
-		onfocusin,
-		onfocusout,
 		tabindex: tabindexOverride,
 		root = $bindable(null),
 		children
@@ -76,22 +71,10 @@
 	title={$state === 'copyable' ? 'Click to copy' : undefined}
 	style:color
 	style:background
-	on:focusin={onfocusin ?? state.focus}
-	on:focusout={onfocusout}
-	on:click={state.copy}
-	on:keydown={(e) => {
-		state.handleKeyboard?.(e);
-
-		if (e.defaultPrevented) return;
-
-		if (e.key === 'Enter' || e.key === ' ') {
-			state.copy?.();
-		}
-
-		if (e.key == 'Escape') {
-			state.cancel?.();
-		}
-	}}
+	on:focusin={state.focus}
+	on:focusout={state.focusout}
+	on:click={state.click}
+	on:keydown={state.keydown}
 >
 	{@render children?.()}
 
@@ -229,34 +212,6 @@
 
 	.super-cell.error.editing {
 		border-color: var(--spectrum-global-color-red-500);
-	}
-
-	:global(.super-cell > .datetime-display) {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		flex: 1 1 auto;
-		min-width: 0;
-		height: 100%;
-		padding: 0.25rem 0.75rem;
-		box-sizing: border-box;
-		cursor: inherit;
-	}
-
-	:global(.super-cell.inline > .datetime-display) {
-		padding: 0.25rem;
-	}
-
-	:global(.super-cell > .datetime-display.placeholder) {
-		font-style: italic;
-		color: var(--spectrum-global-color-gray-600);
-	}
-
-	:global(.super-cell > .datetime-display .calendar-icon) {
-		font-size: 16px;
-		flex-shrink: 0;
-		margin-left: 0.5rem;
-		color: var(--spectrum-global-color-gray-600);
 	}
 
 	.super-cell.slider.view:hover,

@@ -224,9 +224,6 @@
 		view: {
 			focus() {
 				if (!readonly && !disabled) return 'editing';
-			},
-			copy() {
-				if (!readonly && !disabled) return 'editing';
 			}
 		},
 		readonly: {
@@ -238,8 +235,14 @@
 			_enter() {
 				open = false;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(rangeDisplay || '', (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -250,21 +253,25 @@
 		editing: {
 			_enter() {
 				originalValue = localValue ? { ...localValue } : null;
-				open = true;
+				open = false;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			copy() {
+			click() {
 				open = !open;
 			},
-			handleKeyboard(e) {
-				if (e.keyCode == 32) {
+			keydown(e) {
+				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
 					open = !open;
+				}
+
+				if (e.key === 'Escape') {
+					this.cancel();
 				}
 			},
 			focusout(e) {
@@ -347,6 +354,7 @@
 		if (autofocus) {
 			setTimeout(() => {
 				cellState.focus();
+				cellState.click?.();
 			}, 30);
 		}
 	});
@@ -380,7 +388,6 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-	onfocusout={cellState.focusout}
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
@@ -389,9 +396,10 @@
 	<div
 		class="datetime-display"
 		class:placeholder={showPlaceholder}
+		class:inline={baseRole === 'inline'}
 		style:justify-content={align}
 	>
-		<span>{rangeDisplay}</span>
+		<span class:placeholder={showPlaceholder}>{rangeDisplay}</span>
 		{#if inEdit}
 			<i class="ph ph-calendar-blank calendar-icon"></i>
 			{#if localValue && showDirty != false}
@@ -478,6 +486,36 @@
 </PickerPopover>
 
 <style>
+	.datetime-display {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex: 1 1 auto;
+		min-width: 0;
+		height: 100%;
+		padding: 0.25rem 0.75rem;
+		box-sizing: border-box;
+		cursor: inherit;
+	}
+
+	.datetime-display.inline {
+		padding: 0.25rem;
+	}
+
+	.datetime-display.placeholder,
+	.datetime-display.placeholder > span,
+	.datetime-display > span.placeholder {
+		font-style: italic;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.calendar-icon {
+		font-size: 16px;
+		flex-shrink: 0;
+		margin-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
 	.range-picker-container {
 		display: flex;
 		flex-direction: column;

@@ -167,8 +167,14 @@
 			_enter() {
 				localValue = value;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(displayValue || String(value ?? ''), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -233,7 +239,7 @@
 				}
 				return initialState;
 			},
-			handleKeyboard(e) {
+			keydown(e) {
 				if (!e) return;
 
 				const allowedKeysWhenComplete = [
@@ -423,7 +429,7 @@
 						? 'right'
 						: 'left'}
 				on:focusout={cellState.focusout}
-				on:keydown={cellState.handleKeyboard}
+				on:keydown={cellState.keydown}
 				use:initIMask={mask}
 			/>
 		{:else}

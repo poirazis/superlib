@@ -145,11 +145,7 @@
 					return 'editing';
 				}
 			},
-			copy() {
-				if (!readonly && !disabled && !calculated) {
-					return 'editing';
-				}
-			},
+
 			reset(newValue) {
 				if (newValue == localValue) return;
 				const num = Number(value);
@@ -160,7 +156,7 @@
 			}
 		},
 		copyable: {
-			copy() {
+			click() {
 				navigator.clipboard
 					.writeText(formattedValue || String(value ?? ''))
 					.then(() => {
@@ -172,6 +168,12 @@
 					.catch((err) => {
 						console.error('Failed to copy to clipboard:', err);
 					});
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		readonly: {
@@ -236,7 +238,7 @@
 					}, debounceDelay);
 				}
 			},
-			handleKeyboard(e) {
+			keydown(e) {
 				const input = e.target;
 				const key = e.key;
 
@@ -422,7 +424,7 @@
 		disabled={$cellState != 'editing'}
 		value={inEdit ? editText : formattedValue}
 		{placeholder}
-		on:keydown={cellState.handleKeyboard}
+		on:keydown={cellState.keydown}
 		on:input={cellState.handleInput}
 		on:focusout={cellState.focusout}
 		on:wheel={(e) => {

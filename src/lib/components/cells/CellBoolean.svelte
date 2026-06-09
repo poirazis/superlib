@@ -107,8 +107,14 @@
 			_enter() {
 				localValue = value;
 			},
-			copy() {
+			click() {
 				copyTextToClipboard(String(!!value), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {

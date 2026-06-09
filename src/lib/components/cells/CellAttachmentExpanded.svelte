@@ -207,8 +207,14 @@
 		},
 		copyable: {
 			_enter() {},
-			copy() {
+			click() {
 				copyTextToClipboard(attachmentCopyText(localvalue), (copied) => (justCopied = copied));
+			},
+			keydown(e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
 		},
 		disabled: {
@@ -277,7 +283,7 @@
 	{color}
 	{background}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-	onfocusout={cellState.focusout}
+
 >
 	{#if controlType == 'list'}
 		<div class="attachments" bind:this={picker}>
