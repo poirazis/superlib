@@ -44,6 +44,7 @@
 	let showDirty = $derived(config.showDirty);
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
+	let copyIcon = $derived(config.copyIcon ?? 'onhover');
 	let disabled = $derived(config.disabled);
 
 	// Derived values that do not depend on $cellState
@@ -218,6 +219,7 @@
 	{clearable}
 	{error}
 	{justCopied}
+	{copyIcon}
 	{color}
 	{background}
 >

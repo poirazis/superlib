@@ -1,14 +1,15 @@
 <script>
-	import { getContext, createEventDispatcher, tick } from 'svelte';
-	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
+	import { createEventDispatcher, tick } from 'svelte';
 	import CellPickerFrame from './CellPickerFrame.svelte';
 	import CellPickerOptionsList from './CellPickerOptionsList.svelte';
 	import CellPickerOption from './CellPickerOption.svelte';
+	import PickerPopover from './PickerPopover.svelte';
+	import { OPTIONS_COLORS_ARRAY } from './optionsColors';
+	import { useOptionsSource } from './useOptionsSource.svelte';
 	import './CellCommon.css';
 	import fsm from 'svelte-fsm';
 
 	const dispatch = createEventDispatcher();
-	const { API, QueryUtils, fetchData, memo, derivedMemo } = getContext('sdk');
 
 	let {
 		id,
@@ -22,66 +23,37 @@
 	let anchor = $state();
 	let editor = $state();
 	let optionsList = $state();
-	let options = memo([]);
-	let labels = memo({});
-	let optionColors = $state({});
-	let filteredOptions = $state([]);
 	let focusedOptionIdx = $state(-1);
 	let timer = $state();
 	let localValue = $state([]);
 
 	let searchTerm = $state(null);
 	let inputValue = $state(null);
-	let initLimit = $state(15);
-	let fetch = $state();
-	let loading = $state(false);
 
 	let config = $derived(cellOptions ?? {});
 
 	let controlType = $derived(config.controlType);
-	let optionsSource = $derived(config.optionsSource ?? 'schema');
-	let limit = $derived(config.limit);
-	let sortColumn = $derived(config.sortColumn);
-	let sortOrder = $derived(config.sortOrder);
-	let valueColumn = $derived(config.valueColumn);
-	let labelColumn = $derived(config.labelColumn);
-	let iconColumn = $derived(config.iconColumn);
-	let colorColumn = $derived(config.colorColumn);
-	let customOptions = $derived(config.customOptions);
 	let optionsViewMode = $derived(config.optionsViewMode);
 	let role = $derived(config.role);
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
-	let error = $derived(config.error);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
-	let filter = $derived(config.filter);
 	let pickerWidth = $derived(config.pickerWidth);
-	let debounce = $derived(config.debounce);
 	let autocomplete = $derived(config.autocomplete);
-	let initialState = $derived(config.initialState);
 	let placeholder = $derived(config.placeholder || '');
 	let align = $derived(config.align);
 	let padding = $derived(config.padding);
 	let showDirty = $derived(config.showDirty);
+	let iconColumn = $derived(config.iconColumn);
 
-	// Handle Options from Data Source
-	const dataSourceStore = memo(undefined);
+	const source = useOptionsSource({
+		getCellOptions: () => cellOptions ?? {},
+		getFieldSchema: () => fieldSchema
+	});
 
-	const createFetch = (datasource) => {
-		initLimit = limit || 15;
-
-		return fetchData({
-			API,
-			datasource,
-			options: {
-				query: QueryUtils.buildQuery(cellOptions.filter || []),
-				sortColumn: cellOptions.sortColumn,
-				sortOrder: cellOptions.sortOrder,
-				limit
-			}
-		});
-	};
+	const { options, labels, dataSourceStore, colors } = source;
+	let optionsSource = $derived(source.optionsSource);
 
 	const editorState = fsm('Closed', {
 		'*': {
@@ -89,7 +61,7 @@
 				if (idx < 0) return;
 
 				if (cellOptions.disabled || cellOptions.readonly) return;
-				let option = filteredOptions[idx];
+				let option = source.filteredOptions[idx];
 				let pos = localValue.indexOf(option);
 
 				if (multi && pos > -1) {
@@ -131,64 +103,7 @@
 				}
 			},
 			filterOptions(term) {
-				if (optionsSource == 'data') {
-					// For datasource, update the fetch with filter
-					let appliedFilter = {};
-
-					// Start with base filter or create new one
-					if (filter && typeof filter === 'object' && Object.keys(filter).length > 0) {
-						appliedFilter = JSON.parse(JSON.stringify(filter)); // Deep clone
-					} else {
-						// Create a base filter object
-						appliedFilter = {
-							logicalOperator: 'all',
-							onEmptyFilter: 'all',
-							groups: []
-						};
-					}
-
-					// Add search term as a new filter group if provided
-					if (term != null && term.trim() !== '') {
-						const searchFilterGroup = {
-							logicalOperator: 'any',
-							filters: [
-								{
-									valueType: 'Value',
-									field: labelColumn || valueColumn,
-									type: 'string',
-									constraints: {
-										type: 'string',
-										length: {},
-										presence: false
-									},
-									operator: 'fuzzy',
-									noValue: false,
-									value: term
-								}
-							]
-						};
-
-						// Add the search filter group
-						if (!appliedFilter.groups) {
-							appliedFilter.groups = [];
-						}
-						appliedFilter.groups.push(searchFilterGroup);
-					}
-
-					const query = QueryUtils.buildQuery(appliedFilter);
-					fetch?.update({
-						query
-					});
-				} else {
-					// Client-side filtering for non-datasource
-					if (term) {
-						filteredOptions = $options.filter((x) =>
-							x?.toLocaleLowerCase().includes(term.toLocaleLowerCase())
-						);
-					} else {
-						filteredOptions = $options;
-					}
-				}
+				source.filterOptions(term);
 			},
 			clearFilter() {
 				searchTerm = null;
@@ -234,7 +149,7 @@
 				}
 
 				if (e.key == 'Enter') {
-					if (focusedOptionIdx > -1 && filteredOptions[focusedOptionIdx])
+					if (focusedOptionIdx > -1 && source.filteredOptions[focusedOptionIdx])
 						if (!multi) this.toggleOption(focusedOptionIdx);
 
 					cellState.submit();
@@ -246,7 +161,7 @@
 			},
 			highlightNext() {
 				focusedOptionIdx += 1;
-				if (focusedOptionIdx > filteredOptions.length - 1) focusedOptionIdx = 0;
+				if (focusedOptionIdx > source.filteredOptions.length - 1) focusedOptionIdx = 0;
 				tick().then(() => {
 					const focusedElement = optionsList.querySelector('.option.focused');
 					if (focusedElement) {
@@ -259,7 +174,7 @@
 			},
 			highlightPrevious() {
 				focusedOptionIdx -= 1;
-				if (focusedOptionIdx < 0) focusedOptionIdx = filteredOptions.length - 1;
+				if (focusedOptionIdx < 0) focusedOptionIdx = source.filteredOptions.length - 1;
 				tick().then(() => {
 					const focusedElement = optionsList.querySelector('.option.focused');
 					if (focusedElement) {
@@ -271,28 +186,10 @@
 				});
 			},
 			fetchMore() {
-				if ($fetch?.loading) return;
-				if ($fetch?.rows?.length < initLimit) {
-					return;
-				} // No more data to fetch
-				else {
-					initLimit += 100;
-
-					fetch?.update({
-						limit: initLimit
-					});
-				}
+				source.fetchMore();
 			},
 			handleScroll(e) {
-				const element = e.target;
-				const scrollTop = element.scrollTop;
-				const scrollHeight = element.scrollHeight;
-				const clientHeight = element.clientHeight;
-
-				// Fetch more when user scrolls near the bottom (within 50px)
-				if (scrollTop + clientHeight >= scrollHeight - 50) {
-					this.fetchMore();
-				}
+				source.handleScroll(e);
 			}
 		},
 		Closed: {
@@ -354,75 +251,27 @@
 				return state;
 			},
 			refresh() {
-				$options = [];
-				optionColors = {};
-				$labels = {};
-				filteredOptions = [];
-				if (optionsSource != 'data') {
-					this.loadOptions(optionsSource);
-				}
-				return optionsSource == 'data' ? 'Loading' : 'View';
+				return source.refresh() ? 'Loading' : 'View';
 			},
 			reload() {
-				this.loadOptions(optionsSource);
-			},
-			loadSchemaOptions() {
-				try {
-					optionColors = fieldSchema?.optionColors || {};
-					$options = fieldSchema?.constraints?.inclusion || [];
-					$labels = {};
-					filteredOptions = $options;
-				} catch (e) {}
-			},
-			loadDataOptions(rows) {
-				$options = [];
-				$labels = {};
-				let primaryDisplay = labelColumn || labelColumn;
-				if (rows && rows.length) {
-					rows.forEach((row) => {
-						$options.push(row[valueColumn]);
-						$labels[row[valueColumn]] = row[primaryDisplay];
-						if (colorColumn) optionColors[row[valueColumn]] = row[colorColumn];
-					});
-				}
-
-				$options = $options;
-				filteredOptions = $options;
-			},
-			loadCustomOptions() {
-				$options = [];
-				$labels = {};
-				if (customOptions?.length) {
-					customOptions.forEach((row) => {
-						$options.push(row.value || row);
-						$labels[row.value] = row.label || row;
-					});
-				}
-				$options = $options;
-				filteredOptions = $options;
+				source.loadOptions(optionsSource);
 			},
 			loadOptions(src) {
-				if (src == 'data') {
-					this.loadDataOptions($fetch?.rows);
-				} else if (src == 'custom') {
-					this.loadCustomOptions();
-				} else {
-					this.loadSchemaOptions();
-				}
+				source.loadOptions(src);
 			}
 		},
 		Loading: {
 			_enter() {
-				fetch = createFetch($dataSourceStore);
-				loading = true;
+				source.fetch = source.createFetch($dataSourceStore);
+				source.loading = true;
 			},
 			_exit() {
-				loading = false;
+				source.loading = false;
 			},
 			refresh() {},
 			reload() {},
-			syncFetch(fetch) {
-				if (fetch?.loaded) {
+			syncFetch(fetchState) {
+				if (source.syncFetchLoaded(fetchState?.loaded)) {
 					return cellOptions.initialState || 'View';
 				}
 			},
@@ -473,11 +322,6 @@
 				editorState.toggle();
 			},
 			focusout(e) {
-				console.log('focusout', {
-					relatedTarget: e.relatedTarget,
-					anchor,
-					editor
-				});
 				if (anchor.contains(e.relatedTarget)) {
 					return;
 				}
@@ -498,11 +342,6 @@
 				return 'View';
 			},
 			popupfocusout(e) {
-				console.log('popup focusout', {
-					relatedTarget: e.relatedTarget,
-					anchor,
-					editor
-				});
 				if (anchor != e?.relatedTarget) {
 					this.submit();
 					return 'View';
@@ -540,55 +379,15 @@
 		}
 	});
 
-	const colors = derivedMemo(options, ($options) => {
-		let obj = {};
-		$options.forEach(
-			(option, index) =>
-				(obj[option] = optionColors[option] ?? colorsArray[index % colorsArray.length])
-		);
-		return obj;
-	});
-
-	const colorsArray = [
-		'hsla(175, 90%, 75%, 0.35)',
-		'hsla(25, 90%, 75%, 0.35)',
-		'hsla(340, 85%, 72%, 0.35)',
-		'hsla(75, 80%, 75%, 0.35)',
-		'hsla(265, 85%, 70%, 0.35)',
-		'hsla(125, 90%, 75%, 0.35)',
-		'hsla(0, 90%, 75%, 0.35)',
-		'hsla(225, 90%, 75%, 0.35)',
-		'hsla(100, 80%, 75%, 0.35)',
-		'hsla(315, 85%, 70%, 0.35)',
-		'hsla(50, 80%, 75%, 0.35)',
-		'hsla(165, 85%, 70%, 0.35)',
-		'hsla(200, 90%, 75%, 0.35)',
-		'hsla(290, 85%, 72%, 0.35)',
-		'hsla(85, 85%, 72%, 0.35)',
-		'hsla(140, 85%, 72%, 0.35)',
-		'hsla(250, 90%, 75%, 0.35)',
-		'hsla(35, 85%, 72%, 0.35)',
-		'hsla(190, 85%, 72%, 0.35)',
-		'hsla(350, 90%, 75%, 0.35)',
-		'hsla(60, 85%, 70%, 0.35)',
-		'hsla(150, 90%, 75%, 0.35)',
-		'hsla(300, 90%, 75%, 0.35)',
-		'hsla(10, 85%, 70%, 0.35)',
-		'hsla(215, 85%, 70%, 0.35)',
-		'hsla(325, 90%, 75%, 0.35)',
-		'hsla(115, 85%, 70%, 0.35)',
-		'hsla(240, 85%, 72%, 0.35)',
-		'hsla(275, 90%, 75%, 0.35)'
-	];
-
 	let originalValue = $state('[]');
 
 	let inputSelect = $derived(controlType == 'inputSelect');
-	let defaultQuery = $derived(QueryUtils.buildQuery(filter || []));
 
 	let isObjects = $derived(localValue.length && typeof localValue[0] == 'object' ? true : false);
 	let isEmpty = $derived(localValue.length < 1);
 	let nooptions = $derived(!$options || $options.length < 1);
+	let loading = $derived(source.loading);
+	let fetch = $derived(source.fetch);
 	let inEdit = $derived($cellState == 'Editing');
 	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
 	let pills = $derived(optionsViewMode == 'pills');
@@ -740,7 +539,7 @@
 								{#each localValue as val, idx (val)}
 									<div
 										class="item"
-										style:--option-color={$colors[val] || colorsArray[idx % colorsArray.length]}
+										style:--option-color={$colors[val] || OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
 									>
 										<div class="loope"></div>
 										<span> {isObjects ? 'JSON' : $labels[val] || val} </span>
@@ -760,18 +559,14 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-{#if inEdit}
-	<SuperPopover
-		{anchor}
-		useAnchorWidth
-		minWidth={pickerWidth}
-		align="left"
-		maxHeight={250}
-		{open}
-		on:close={cellState.focusout}
-	>
-		{#snippet children()}
-			<CellPickerFrame>
+<PickerPopover
+	{anchor}
+	visible={inEdit}
+	minWidth={pickerWidth}
+	{open}
+	onClose={cellState.focusout}
+>
+	<CellPickerFrame>
 				{#if searchTerm && !inputSelect && !isEmpty}
 					<div class="searchControl">
 						<i class="search-icon ph ph-magnifying-glass" class:active={searchTerm}></i>
@@ -783,15 +578,15 @@
 					onMouseLeave={() => (focusedOptionIdx = -1)}
 					onScroll={optionsSource == 'data' ? editorState.handleScroll : undefined}
 				>
-					{#if $fetch?.loading && !$fetch?.loaded}
+					{#if fetch?.loading && !fetch?.loaded}
 						<div class="option loading">
 							<i class="ph ph-spinner spin"></i>
 							Loading...
 						</div>
 					{/if}
 
-					{#if filteredOptions?.length}
-						{#each filteredOptions as option, idx (idx)}
+					{#if source.filteredOptions?.length}
+						{#each source.filteredOptions as option, idx (idx)}
 							<CellPickerOption
 								textMode={optionsViewMode == 'text'}
 								focused={focusedOptionIdx === idx}
@@ -803,7 +598,7 @@
 								<span>
 									<i
 										class={iconColumn
-											? 'ph ph-' + $fetch?.rows?.[idx]?.[iconColumn]
+											? 'ph ph-' + fetch?.rows?.[idx]?.[iconColumn]
 											: 'ph-fill ph-square'}
 										style:color={$colors[option]}
 									></i>
@@ -812,7 +607,7 @@
 								<i class="ph ph-check"></i>
 							</CellPickerOption>
 						{/each}
-						{#if $fetch?.loading}
+						{#if fetch?.loading}
 							<div class="option loading">
 								<i class="ph ph-spinner spin"></i>
 								Loading more...
@@ -820,7 +615,7 @@
 						{/if}
 					{/if}
 
-					{#if filteredOptions?.length === 0}
+					{#if source.filteredOptions?.length === 0}
 						<div class="option">
 							<span>
 								<i class="ri-close-line"></i>
@@ -829,10 +624,8 @@
 						</div>
 					{/if}
 				</CellPickerOptionsList>
-			</CellPickerFrame>
-		{/snippet}
-	</SuperPopover>
-{/if}
+	</CellPickerFrame>
+</PickerPopover>
 
 <style>
 	.searchControl {

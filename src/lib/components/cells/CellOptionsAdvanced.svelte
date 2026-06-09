@@ -1,17 +1,17 @@
 <script>
   import fsm from "svelte-fsm";
   import { getContext, createEventDispatcher } from "svelte";
-  import SuperPopover from '../SuperPopover/SuperPopover.svelte';
   import CellPickerOptionsList from './CellPickerOptionsList.svelte';
   import CellPickerOptionSimple from './CellPickerOptionSimple.svelte';
+  import PickerPopover from './PickerPopover.svelte';
   import SuperList from '../SuperList/SuperList.svelte';
   import CellSkeleton from './CellSkeleton.svelte';
   import Switch from '../UI/elements/Switch.svelte';
+  import { useOptionsSource } from './useOptionsSource.svelte';
   import "./CellCommon.css";
 
   const dispatch = createEventDispatcher();
-  const { API, QueryUtils, fetchData, memo, derivedMemo, builderStore } =
-    getContext("sdk");
+  const { builderStore } = getContext("sdk");
 
   let {
     cellOptions,
@@ -23,89 +23,48 @@
 
   let anchor = $state();
   let editor = $state();
-  let options = memo([]);
-  let labels = $state({});
-  let optionColors = $state({});
-  let optionIcons = $state({});
-  let filteredOptions = $state([]);
   let focusedOptionIdx = $state(-1);
   let timer = $state();
   let picker = $state();
   let inactive = $state(true);
-  let fetch;
 
   let localValue = $state([]);
 
   let originalValue = $state('[]');
 
-  const colorsArray = [
-    "hsla(0, 90%, 75%, 0.35)",
-    "hsla(25, 90%, 75%, 0.35)",
-    "hsla(50, 80%, 75%, 0.35)",
-    "hsla(75, 80%, 75%, 0.35)",
-    "hsla(100, 80%, 75%, 0.35)",
-    "hsla(125, 90%, 75%, 0.35)",
-    "hsla(150, 90%, 75%, 0.35)",
-    "hsla(175, 90%, 75%, 0.35)",
-    "hsla(200, 90%, 75%, 0.35)",
-    "hsla(225, 90%, 75%, 0.35)",
-    "hsla(250, 90%, 75%, 0.35)",
-    "hsla(275, 90%, 75%, 0.35)",
-    "hsla(300, 90%, 75%, 0.35)",
-    "hsla(325, 90%, 75%, 0.35)",
-    "hsla(350, 90%, 75%, 0.35)",
-  ];
-
   let config = $derived(cellOptions ?? {});
 
   let controlType = $derived(config.controlType);
-  let optionsSource = $derived(config.optionsSource);
-  let labelColumn = $derived(config.labelColumn);
-  let valueColumn = $derived(config.valueColumn);
-  let iconColumn = $derived(config.iconColumn);
-  let colorColumn = $derived(config.colorColumn);
-  let customOptions = $derived(config.customOptions);
   let role = $derived(config.role);
   let readonly = $derived(config.readonly);
   let disabled = $derived(config.disabled);
   let direction = $derived(config.direction);
-  let error = $derived(config.error);
   let color = $derived(config.color);
   let background = $derived(config.background);
 
   let inBuilder = $derived($builderStore.inBuilder);
 
-  const dataSourceStore = memo({});
-
-  const colors = derivedMemo(options, ($options) => {
-    let obj = {};
-    if (cellOptions.optionsSource == "custom") return obj;
-    $options.forEach(
-      (option, index) =>
-        (obj[option] = optionColors[option] ?? colorsArray[index % 14]),
-    );
-    return obj;
+  const source = useOptionsSource({
+    getCellOptions: () => cellOptions ?? {},
+    getFieldSchema: () => fieldSchema,
+    defaultLimit: 1000,
+    skipCustomPalette: true,
   });
 
+  const { options, labels, dataSourceStore, colors } = source;
+  let optionsSource = $derived(source.optionsSource);
+  let optionIcons = $derived(source.optionIcons);
+
   let fullSelection = $derived(
-    filteredOptions.length == localValue.length && filteredOptions.length > 0,
+    source.filteredOptions.length == localValue.length &&
+      source.filteredOptions.length > 0,
   );
   let radios = $derived(controlType == "radio");
   let isButtons = $derived(controlType == "buttons");
-  let allSelected = $derived(filteredOptions.length == localValue.length);
-
-  const createFetch = (datasource) => {
-    return fetchData({
-      API,
-      datasource,
-      options: {
-        query: QueryUtils.buildQuery(cellOptions.filter),
-        sortColumn: cellOptions.sortColumn,
-        sortOrder: cellOptions.sortOrder,
-        limit: cellOptions.limit || 1000,
-      },
-    });
-  };
+  let allSelected = $derived(
+    source.filteredOptions.length == localValue.length,
+  );
+  let fetch = $derived(source.fetch);
 
   export const cellState = fsm("Loading", {
     "*": {
@@ -113,43 +72,14 @@
         return state;
       },
       refresh() {
-        $options = [];
+        source.resetOptionStores();
         return "Loading";
       },
       loadOptions() {
-        if (optionsSource == "schema") this.loadSchemaOptions();
-        else if (optionsSource == "data") this.loadDataOptions($fetch?.rows);
-        else if (optionsSource == "custom") this.loadCustomOptions();
-      },
-      loadSchemaOptions() {
-        optionColors = fieldSchema?.optionColors || {};
-        $options = fieldSchema?.constraints?.inclusion || [];
-        filteredOptions = $options;
-      },
-      loadDataOptions(rows) {
-        if (rows && rows.length) {
-          rows.forEach((row) => {
-            $options.push(row[valueColumn]?.toString());
-            labels[row[valueColumn]] =
-              row[labelColumn || $fetch.definition.primaryDisplay];
-            optionColors[row[valueColumn]] = row[colorColumn];
-            optionIcons[row[valueColumn]] = row[iconColumn];
-          });
-        }
-        $options = $options;
-        filteredOptions = $options;
-      },
-      loadCustomOptions() {
-        if (customOptions?.length) {
-          customOptions.forEach((row) => {
-            $options.push(row.value);
-            labels[row.value] = row.label;
-          });
-        }
-        $options = $options;
+        source.loadOptions(optionsSource);
       },
       clearFilters() {
-        filteredOptions = $options;
+        source.filteredOptions = source.getOptionsSnapshot();
       },
     },
     Loading: {
@@ -157,14 +87,14 @@
         if (cellOptions.optionsSource != "data")
           this.goTo.debounce(10, cellOptions.initialState || "View");
         else {
-          fetch = createFetch($dataSourceStore);
+          source.fetch = source.createFetch($dataSourceStore);
         }
       },
       _exit() {
         this.loadOptions();
       },
-      syncFetch(fetch) {
-        if (fetch?.loaded) {
+      syncFetch(fetchState) {
+        if (source.syncFetchLoaded(fetchState?.loaded)) {
           return cellOptions.initialState || "View";
         }
       },
@@ -239,13 +169,13 @@
           }, cellOptions.debounce ?? 0);
         }
 
-        if (!multi || filteredOptions.length == localValue.length) {
+        if (!multi || source.filteredOptions.length == localValue.length) {
           anchor?.focus();
         }
       },
       toggleAll() {
         if (allSelected) localValue = [];
-        else localValue = [...filteredOptions];
+        else localValue = [...source.filteredOptions];
 
         if (cellOptions.debounce) {
           clearTimeout(timer);
@@ -294,11 +224,7 @@
       },
       _exit() {},
       filterOptions(e) {
-        if (e && e.target.value != "") {
-          filteredOptions = $options.filter((x) =>
-            x?.startsWith(e.target.value),
-          );
-        } else filteredOptions = $options;
+        source.filterOptions(e?.target?.value ?? "", "prefix");
       },
       close() {
         return "Closed";
@@ -354,24 +280,18 @@
 
   $effect(() => {
     if (inBuilder) {
-      cellState.refresh(
-        fieldSchema,
-        optionsSource,
-        customOptions,
-        labelColumn,
-        valueColumn,
-        iconColumn,
-        colorColumn,
-      );
+      cellState.refresh();
     }
   });
 
   $effect(() => {
-    cellState.syncFetch($fetch);
+    cellState.syncFetch(fetch);
   });
 
   $effect(() => {
-    cellState.refresh($dataSourceStore);
+    if ($dataSourceStore) {
+      cellState.refresh();
+    }
   });
 
   $effect(() => {
@@ -422,7 +342,7 @@
           <SuperList
             items={localValue}
             itemsColors={$colors}
-            itemsLabels={labels}
+            itemsLabels={$labels}
             showColors={cellOptions.optionsViewMode != "text"}
             reorderOnly={cellOptions.reorderOnly}
             placeholder={cellOptions.placeholder}
@@ -467,7 +387,7 @@
                         ? "ph-fill ph-check-square"
                         : "ph ph-square"}
                 ></i>
-                {labels[option] || option}
+                {$labels[option] || option}
               </div>
             {/each}
           </div>
@@ -480,7 +400,7 @@
                 style:--option-color={$colors[option]}
                 on:click={() => editorState.toggleOption(idx)}
               >
-                {labels[option] || option}
+                {$labels[option] || option}
               </div>
             {/each}
           </div>
@@ -518,7 +438,7 @@
               >
                 <i class={optionIcons[option] || "no-icon"}></i>
                 <div class="text">
-                  {labels[option] || option}
+                  {$labels[option] || option}
                 </div>
                 <Switch
                   checked={localValue.includes(option)}
@@ -536,46 +456,42 @@
 </div>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-{#if inEdit && controlType == "list"}
-  <SuperPopover
-    {anchor}
-    useAnchorWidth
-    maxHeight={400}
-    open={$editorState == "Open"}
-    on:close={cellState.focusout}
+<PickerPopover
+  {anchor}
+  visible={inEdit && controlType == "list"}
+  maxHeight={400}
+  open={$editorState == "Open"}
+  onClose={cellState.focusout}
+>
+  <CellPickerOptionsList
+    bind:optionsList={picker}
+    onMouseLeave={() => (focusedOptionIdx = -1)}
   >
-    {#snippet children()}
-      <CellPickerOptionsList
-        bind:optionsList={picker}
-        onMouseLeave={() => (focusedOptionIdx = -1)}
-      >
-        {#if filteredOptions?.length < 1 || filteredOptions.length == localValue.length}
-          <div class="option">
-            <span>
-              <i class="ri-close-line"></i>
-              No Options Found
-            </span>
-          </div>
-        {:else}
-          {#each filteredOptions as option, idx (idx)}
-            <CellPickerOptionSimple
-              focused={focusedOptionIdx === idx}
-              selected={localValue?.includes(option)}
-              optionColor={$colors[option]}
-              onSelect={() => editorState.toggleOption.debounce(150, idx)}
-              onFocus={() => (focusedOptionIdx = idx)}
-            >
-              <span>
-                <i class="ri-checkbox-blank-fill"></i>
-                {labels[option] || option}
-              </span>
-            </CellPickerOptionSimple>
-          {/each}
-        {/if}
-      </CellPickerOptionsList>
-    {/snippet}
-  </SuperPopover>
-{/if}
+    {#if source.filteredOptions?.length < 1 || source.filteredOptions.length == localValue.length}
+      <div class="option">
+        <span>
+          <i class="ri-close-line"></i>
+          No Options Found
+        </span>
+      </div>
+    {:else}
+      {#each source.filteredOptions as option, idx (idx)}
+        <CellPickerOptionSimple
+          focused={focusedOptionIdx === idx}
+          selected={localValue?.includes(option)}
+          optionColor={$colors[option]}
+          onSelect={() => editorState.toggleOption.debounce(150, idx)}
+          onFocus={() => (focusedOptionIdx = idx)}
+        >
+          <span>
+            <i class="ri-checkbox-blank-fill"></i>
+            {$labels[option] || option}
+          </span>
+        </CellPickerOptionSimple>
+      {/each}
+    {/if}
+  </CellPickerOptionsList>
+</PickerPopover>
 
 <style>
   :global(.options) {

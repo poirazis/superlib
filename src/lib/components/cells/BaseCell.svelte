@@ -9,12 +9,17 @@
 		multirow?: boolean;
 		placeholder?: boolean; // applies the .placeholder visual class
 		justCopied?: boolean;
+		copyIcon?: 'always' | 'onhover' | string;
 		grabber?: boolean;
 		color?: string;
 		background?: string;
 		styles?: Record<string, any>; // for use with stylable action
 		// event handlers (attach to root)
 		onfocusin?: (e?: any) => void;
+		onfocusout?: (e?: any) => void;
+		tabindex?: number;
+		popupOpen?: boolean;
+		root?: HTMLElement | null;
 
 		// allow other attributes / listeners via spread
 		[key: string]: any;
@@ -30,14 +35,24 @@
 		multirow = false,
 		placeholder = false,
 		justCopied = false,
+		copyIcon = 'onhover',
 		grabber = false,
+		popupOpen = false,
 		color,
 		background,
 		onfocusin,
+		onfocusout,
+		tabindex: tabindexOverride,
+		root = $bindable(null),
 		children
 	}: BaseCellProps = $props();
 
-	let copyIcon = $derived(justCopied ? 'ph ph-check' : 'ph ph-copy');
+	let cellTabindex = $derived(
+		tabindexOverride ?? ($state == 'view' || $state == 'copyable' ? 0 : -1)
+	);
+
+	let actionIcon = $derived(justCopied ? 'ph ph-check' : 'ph ph-copy');
+	let copyIconOnHover = $derived(copyIcon === 'onhover');
 </script>
 
 <!-- Common a11y ignores for interactive cell root (cell-like divs are intentionally focusable) -->
@@ -47,20 +62,30 @@
 <!-- svelte-ignore event_directive_deprecated -->
 
 <div
+	bind:this={root}
 	{id}
-	tabindex={$state == 'view' || $state == 'copyable' ? 0 : -1}
+	tabindex={cellTabindex}
 	class="super-cell {$state} {role}"
 	class:multirow={multirow || role == 'inline'}
 	class:grabber
 	class:justCopied
+	class:icon-on-hover={$state === 'copyable' && copyIconOnHover}
+	class:open-popup={popupOpen}
+	class:isDirty={isDirty}
+	class:error={error}
 	title={$state === 'copyable' ? 'Click to copy' : undefined}
 	style:color
 	style:background
-	on:focusin={state.focus}
+	on:focusin={onfocusin ?? state.focus}
+	on:focusout={onfocusout}
 	on:click={state.copy}
 	on:keydown={(e) => {
+		state.handleKeyboard?.(e);
+
+		if (e.defaultPrevented) return;
+
 		if (e.key === 'Enter' || e.key === ' ') {
-			state.copy();
+			state.copy?.();
 		}
 
 		if (e.key == 'Escape') {
@@ -81,7 +106,7 @@
 	{/if}
 
 	{#if $state === 'copyable'}
-		<i class={copyIcon + ' copy-icon'} aria-hidden="true"></i>
+		<i class={actionIcon + ' copy-icon'} aria-hidden="true"></i>
 	{/if}
 </div>
 
@@ -177,14 +202,61 @@
 		color: var(--spectrum-global-color-green-700);
 		opacity: 1;
 	}
-	.super-cell.copyable:hover .copy-icon {
-		opacity: 1;
+
+	.super-cell.copyable.icon-on-hover .copy-icon {
+		opacity: 0;
+	}
+
+	.super-cell.copyable:hover .copy-icon,
+	.super-cell.copyable:focus .copy-icon {
+		opacity: 0.85;
 		cursor: pointer;
+	}
+
+	.super-cell.copyable:hover .copy-icon:hover,
+	.super-cell.copyable:focus .copy-icon:hover {
+		opacity: 1;
 	}
 
 	.super-cell.editing {
 		border-color: var(--spectrum-global-color-static-blue-400);
 		background: var(--spectrum-global-color-gray-50);
+	}
+
+	.super-cell.open-popup.editing {
+		border-color: var(--spectrum-global-color-static-blue-500);
+	}
+
+	.super-cell.error.editing {
+		border-color: var(--spectrum-global-color-red-500);
+	}
+
+	:global(.super-cell > .datetime-display) {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex: 1 1 auto;
+		min-width: 0;
+		height: 100%;
+		padding: 0.25rem 0.75rem;
+		box-sizing: border-box;
+		cursor: inherit;
+	}
+
+	:global(.super-cell.inline > .datetime-display) {
+		padding: 0.25rem;
+	}
+
+	:global(.super-cell > .datetime-display.placeholder) {
+		font-style: italic;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
+	:global(.super-cell > .datetime-display .calendar-icon) {
+		font-size: 16px;
+		flex-shrink: 0;
+		margin-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-600);
 	}
 
 	.super-cell.slider.view:hover,
@@ -208,7 +280,9 @@
 	.copy-icon {
 		opacity: 0.45;
 		font-size: 15px;
-		transition: color 0.15s ease;
+		transition:
+			color 0.15s ease,
+			opacity 0.15s ease;
 		align-self: center;
 		margin-right: 0.75rem;
 		margin-left: 0.5rem;
