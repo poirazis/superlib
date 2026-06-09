@@ -327,7 +327,7 @@
 		}
 		&:active {
 			background-color: var(--spectrum-global-color-gray-100);
-			border: 1px solid var(--spectrum-global-color-gray-500);
+			scale: 0.9;
 		}
 
 		&.quiet {

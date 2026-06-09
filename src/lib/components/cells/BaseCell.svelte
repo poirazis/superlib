@@ -1,0 +1,276 @@
+<script lang="ts">
+	import { getContext } from 'svelte';
+	interface BaseCellProps {
+		role?: string;
+		state?: any; // state machine instance
+		id?: string;
+		error?: boolean;
+		isDirty?: boolean;
+		multirow?: boolean;
+		placeholder?: boolean; // applies the .placeholder visual class
+		justCopied?: boolean;
+		grabber?: boolean;
+		color?: string;
+		background?: string;
+		styles?: Record<string, any>; // for use with stylable action
+		// event handlers (attach to root)
+		onfocusin?: (e?: any) => void;
+
+		// allow other attributes / listeners via spread
+		[key: string]: any;
+	}
+
+	let {
+		id,
+		role = 'form',
+		state,
+		clearable = false,
+		error = false,
+		isDirty = false,
+		multirow = false,
+		placeholder = false,
+		justCopied = false,
+		grabber = false,
+		color,
+		background,
+		onfocusin,
+		children
+	}: BaseCellProps = $props();
+
+	let copyIcon = $derived(justCopied ? 'ph ph-check' : 'ph ph-copy');
+</script>
+
+<!-- Common a11y ignores for interactive cell root (cell-like divs are intentionally focusable) -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore event_directive_deprecated -->
+
+<div
+	{id}
+	tabindex={$state == 'view' || $state == 'copyable' ? 0 : -1}
+	class="super-cell {$state} {role}"
+	class:multirow={multirow || role == 'inline'}
+	class:grabber
+	class:justCopied
+	title={$state === 'copyable' ? 'Click to copy' : undefined}
+	style:color
+	style:background
+	on:focusin={state.focus}
+	on:click={state.copy}
+	on:keydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			state.copy();
+		}
+
+		if (e.key == 'Escape') {
+			state.cancel?.();
+		}
+	}}
+>
+	{@render children?.()}
+
+	{#if clearable}
+		<!-- svelte-ignore a11y_interactive_supports_focus -->
+		<i
+			class="ph ph-x clear-icon"
+			on:mousedown|preventDefault={state.clear}
+			role="button"
+			title="Clear value"
+		></i>
+	{/if}
+
+	{#if $state === 'copyable'}
+		<i class={copyIcon + ' copy-icon'} aria-hidden="true"></i>
+	{/if}
+</div>
+
+<style>
+	.super-cell {
+		display: flex;
+		align-items: stretch;
+		width: 100%;
+		height: 100%;
+		box-sizing: border-box;
+		overflow: hidden;
+		position: relative;
+		border: 1px solid transparent;
+		min-width: 0;
+		height: 2rem;
+		transition:
+			background-color 0.15s ease,
+			border-color 0.15s ease;
+		transition: border-color 0.15s ease;
+	}
+
+	.super-cell:focus {
+		outline: none;
+	}
+
+	.super-cell.view {
+		background: var(--spectrum-global-color-gray-50);
+		color: var(--spectrum-global-color-gray-800);
+	}
+
+	.super-cell.view:hover {
+		border-color: rgb(from var(--spectrum-global-color-static-blue-400) r g b / 0.5);
+		background: var(--spectrum-global-color-gray-50);
+		cursor: text;
+	}
+
+	.super-cell.form {
+		border-color: var(--spectrum-global-color-gray-300);
+		border-radius: 0.25rem;
+	}
+
+	.super-cell.inline {
+		background: transparent;
+		height: auto;
+		min-height: 1.5rem;
+	}
+
+	.super-cell.cell {
+		height: auto;
+		background: transparent;
+		color: inherit !important;
+	}
+	.super-cell.multirow {
+		align-items: flex-start;
+		height: auto;
+	}
+
+	.super-cell.multirow .copy-icon {
+		align-self: flex-start;
+		margin-top: 0.75rem;
+	}
+
+	.super-cell.disabled {
+		background: var(--spectrum-global-color-gray-200);
+		color: var(--spectrum-global-color-gray-500);
+		cursor: not-allowed;
+	}
+
+	.super-cell.readonly {
+		cursor: default;
+		background: rgb(from var(--spectrum-global-color-gray-50) r g b / 0.75);
+		border-color: var(--spectrum-global-color-gray-100);
+		color: var(--spectrum-global-color-gray-700);
+	}
+
+	.super-cell.copyable {
+		color: var(--spectrum-global-color-gray-700);
+		border-color: var(--spectrum-global-color-gray-300);
+		background: var(--spectrum-global-color-gray-50);
+		cursor: pointer;
+	}
+
+	.super-cell.copyable:hover,
+	.super-cell.copyable:focus {
+		border-color: var(--spectrum-global-color-gray-400);
+		background: var(--spectrum-global-color-gray-100);
+	}
+
+	.super-cell.copyable.justCopied {
+		border-color: rgb(from var(--spectrum-global-color-static-green-400) r g b / 0.75) !important;
+	}
+	.super-cell.copyable.justCopied .copy-icon {
+		color: var(--spectrum-global-color-green-700);
+		opacity: 1;
+	}
+	.super-cell.copyable:hover .copy-icon {
+		opacity: 1;
+		cursor: pointer;
+	}
+
+	.super-cell.editing {
+		border-color: var(--spectrum-global-color-static-blue-400);
+		background: var(--spectrum-global-color-gray-50);
+	}
+
+	.super-cell.slider.view:hover,
+	.super-cell.slider.editing:hover {
+		cursor: default;
+	}
+
+	.super-cell.slider.grabber.view,
+	.super-cell.slider.grabber.editing {
+		background: var(--spectrum-global-color-gray-50);
+		color: var(--spectrum-global-color-gray-800);
+		border-color: transparent;
+	}
+
+	.super-cell.slider.grabber.view:hover,
+	.super-cell.slider.grabber.editing:hover {
+		border-color: rgb(from var(--spectrum-global-color-static-blue-400) r g b / 0.5);
+		background: var(--spectrum-global-color-gray-50);
+	}
+
+	.copy-icon {
+		opacity: 0.45;
+		font-size: 15px;
+		transition: color 0.15s ease;
+		align-self: center;
+		margin-right: 0.75rem;
+		margin-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.clear-icon {
+		font-size: 15px;
+		transition: color 0.15s ease;
+		align-self: center;
+		margin-right: 0.5rem;
+		color: var(--spectrum-global-color-red-400);
+		z-index: 1;
+	}
+
+	.clear-icon:hover {
+		color: var(--spectrum-global-color-red-700);
+		cursor: pointer;
+	}
+
+	:global(.super-cell > i.field-icon) {
+		align-self: center;
+		margin-left: 0.75rem;
+		color: var(--spectrum-global-color-gray-600);
+	}
+	:global(.super-cell > input.editor) {
+		font-style: inherit;
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		cursor: inherit;
+		padding: 0.25rem 0.75rem;
+	}
+	:global(.super-cell.inline > input.editor) {
+		padding: 0.25rem 0.25rem !important;
+	}
+	:global(.super-cell input.editor.placeholder) {
+		font-style: italic !important;
+		color: var(--spectrum-global-color-gray-600) !important;
+	}
+	:global(.super-cell > textarea.editor) {
+		width: 100%;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		font-family: inherit;
+		font-size: inherit;
+		font-weight: inherit;
+		padding: 0.75rem 0.75rem;
+		resize: vertical;
+	}
+	:global(.super-cell > textarea.editor.placeholder) {
+		font-style: italic !important;
+		color: var(--spectrum-global-color-gray-600);
+	}
+</style>

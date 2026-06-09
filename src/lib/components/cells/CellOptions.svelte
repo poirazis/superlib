@@ -1,0 +1,940 @@
+<script>
+	import { getContext, createEventDispatcher, tick } from 'svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
+	import CellPickerFrame from './CellPickerFrame.svelte';
+	import CellPickerOptionsList from './CellPickerOptionsList.svelte';
+	import CellPickerOption from './CellPickerOption.svelte';
+	import './CellCommon.css';
+	import fsm from 'svelte-fsm';
+
+	const dispatch = createEventDispatcher();
+	const { API, QueryUtils, fetchData, memo, derivedMemo } = getContext('sdk');
+
+	let {
+		id,
+		cellOptions,
+		value,
+		fieldSchema,
+		multi: multiProp = false,
+		autofocus = false
+	} = $props();
+
+	let anchor = $state();
+	let editor = $state();
+	let optionsList = $state();
+	let options = memo([]);
+	let labels = memo({});
+	let optionColors = $state({});
+	let filteredOptions = $state([]);
+	let focusedOptionIdx = $state(-1);
+	let timer = $state();
+	let localValue = $state([]);
+
+	let searchTerm = $state(null);
+	let inputValue = $state(null);
+	let initLimit = $state(15);
+	let fetch = $state();
+	let loading = $state(false);
+
+	let config = $derived(cellOptions ?? {});
+
+	let controlType = $derived(config.controlType);
+	let optionsSource = $derived(config.optionsSource ?? 'schema');
+	let limit = $derived(config.limit);
+	let sortColumn = $derived(config.sortColumn);
+	let sortOrder = $derived(config.sortOrder);
+	let valueColumn = $derived(config.valueColumn);
+	let labelColumn = $derived(config.labelColumn);
+	let iconColumn = $derived(config.iconColumn);
+	let colorColumn = $derived(config.colorColumn);
+	let customOptions = $derived(config.customOptions);
+	let optionsViewMode = $derived(config.optionsViewMode);
+	let role = $derived(config.role);
+	let readonly = $derived(config.readonly);
+	let disabled = $derived(config.disabled);
+	let error = $derived(config.error);
+	let color = $derived(config.color);
+	let background = $derived(config.background);
+	let filter = $derived(config.filter);
+	let pickerWidth = $derived(config.pickerWidth);
+	let debounce = $derived(config.debounce);
+	let autocomplete = $derived(config.autocomplete);
+	let initialState = $derived(config.initialState);
+	let placeholder = $derived(config.placeholder || '');
+	let align = $derived(config.align);
+	let padding = $derived(config.padding);
+	let showDirty = $derived(config.showDirty);
+
+	// Handle Options from Data Source
+	const dataSourceStore = memo(undefined);
+
+	const createFetch = (datasource) => {
+		initLimit = limit || 15;
+
+		return fetchData({
+			API,
+			datasource,
+			options: {
+				query: QueryUtils.buildQuery(cellOptions.filter || []),
+				sortColumn: cellOptions.sortColumn,
+				sortOrder: cellOptions.sortOrder,
+				limit
+			}
+		});
+	};
+
+	const editorState = fsm('Closed', {
+		'*': {
+			toggleOption(idx) {
+				if (idx < 0) return;
+
+				if (cellOptions.disabled || cellOptions.readonly) return;
+				let option = filteredOptions[idx];
+				let pos = localValue.indexOf(option);
+
+				if (multi && pos > -1) {
+					localValue.splice(pos, 1);
+					localValue = [...localValue];
+				} else if (multi) {
+					localValue = [...localValue, option];
+				} else {
+					if (localValue[0] == option) localValue.length = 0;
+					else localValue[0] = option;
+
+					localValue = [...localValue];
+
+					inputValue = $labels[localValue[0]] || localValue[0] || '';
+				}
+
+				if (cellOptions.debounce) {
+					clearTimeout(timer);
+					timer = setTimeout(() => {
+						dispatch('change', multi ? localValue : localValue[0]);
+						dispatch(
+							'labelChange',
+							multi
+								? localValue.map((val) => $labels[val] || val)
+								: $labels[localValue[0]] || localValue[0]
+						);
+					}, cellOptions.debounce ?? 0);
+				}
+
+				if (cellOptions.autocomplete) {
+					if (multi) {
+						this.filterOptions();
+					}
+				}
+				if (!multi) {
+					this.close.debounce(10);
+					if (cellOptions.controlType != 'inputSelect') anchor?.focus();
+					else editor?.focus();
+				}
+			},
+			filterOptions(term) {
+				if (optionsSource == 'data') {
+					// For datasource, update the fetch with filter
+					let appliedFilter = {};
+
+					// Start with base filter or create new one
+					if (filter && typeof filter === 'object' && Object.keys(filter).length > 0) {
+						appliedFilter = JSON.parse(JSON.stringify(filter)); // Deep clone
+					} else {
+						// Create a base filter object
+						appliedFilter = {
+							logicalOperator: 'all',
+							onEmptyFilter: 'all',
+							groups: []
+						};
+					}
+
+					// Add search term as a new filter group if provided
+					if (term != null && term.trim() !== '') {
+						const searchFilterGroup = {
+							logicalOperator: 'any',
+							filters: [
+								{
+									valueType: 'Value',
+									field: labelColumn || valueColumn,
+									type: 'string',
+									constraints: {
+										type: 'string',
+										length: {},
+										presence: false
+									},
+									operator: 'fuzzy',
+									noValue: false,
+									value: term
+								}
+							]
+						};
+
+						// Add the search filter group
+						if (!appliedFilter.groups) {
+							appliedFilter.groups = [];
+						}
+						appliedFilter.groups.push(searchFilterGroup);
+					}
+
+					const query = QueryUtils.buildQuery(appliedFilter);
+					fetch?.update({
+						query
+					});
+				} else {
+					// Client-side filtering for non-datasource
+					if (term) {
+						filteredOptions = $options.filter((x) =>
+							x?.toLocaleLowerCase().includes(term.toLocaleLowerCase())
+						);
+					} else {
+						filteredOptions = $options;
+					}
+				}
+			},
+			clearFilter() {
+				searchTerm = null;
+				this.filterOptions();
+			}
+		},
+		Open: {
+			_enter() {
+				searchTerm = '';
+				focusedOptionIdx = -1;
+			},
+			toggle() {
+				return 'Closed';
+			},
+			close() {
+				return 'Closed';
+			},
+			handleKeyboard(e) {
+				if (e.key === 'Backspace' || e.key === 'Delete') {
+					searchTerm = searchTerm.slice(0, -1);
+					this.filterOptions(searchTerm);
+				} else if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+					searchTerm = searchTerm + e.key;
+					this.filterOptions(searchTerm);
+					if (searchTerm?.length && $editorState == 'Closed') this.toggle();
+				}
+
+				if (e.keyCode == 32) {
+					if (focusedOptionIdx > -1) {
+						this.toggleOption(focusedOptionIdx, e.preventDefault());
+						if (!multi) this.close(e.preventDefault());
+					} else if (!inputSelect) {
+						this.close();
+					}
+				}
+
+				if (e.key == 'Escape') {
+					e.stopPropagation();
+					e.preventDefault();
+					searchTerm = null;
+					//anchor?.focus();
+					return 'Closed';
+				}
+
+				if (e.key == 'Enter') {
+					if (focusedOptionIdx > -1 && filteredOptions[focusedOptionIdx])
+						if (!multi) this.toggleOption(focusedOptionIdx);
+
+					cellState.submit();
+					editorState.close();
+				}
+
+				if (e.key == 'ArrowDown') this.highlightNext();
+				if (e.key == 'ArrowUp') this.highlightPrevious();
+			},
+			highlightNext() {
+				focusedOptionIdx += 1;
+				if (focusedOptionIdx > filteredOptions.length - 1) focusedOptionIdx = 0;
+				tick().then(() => {
+					const focusedElement = optionsList.querySelector('.option.focused');
+					if (focusedElement) {
+						focusedElement.scrollIntoView({
+							behavior: 'smooth',
+							block: 'nearest'
+						});
+					}
+				});
+			},
+			highlightPrevious() {
+				focusedOptionIdx -= 1;
+				if (focusedOptionIdx < 0) focusedOptionIdx = filteredOptions.length - 1;
+				tick().then(() => {
+					const focusedElement = optionsList.querySelector('.option.focused');
+					if (focusedElement) {
+						focusedElement.scrollIntoView({
+							behavior: 'smooth',
+							block: 'nearest'
+						});
+					}
+				});
+			},
+			fetchMore() {
+				if ($fetch?.loading) return;
+				if ($fetch?.rows?.length < initLimit) {
+					return;
+				} // No more data to fetch
+				else {
+					initLimit += 100;
+
+					fetch?.update({
+						limit: initLimit
+					});
+				}
+			},
+			handleScroll(e) {
+				const element = e.target;
+				const scrollTop = element.scrollTop;
+				const scrollHeight = element.scrollHeight;
+				const clientHeight = element.clientHeight;
+
+				// Fetch more when user scrolls near the bottom (within 50px)
+				if (scrollTop + clientHeight >= scrollHeight - 50) {
+					this.fetchMore();
+				}
+			}
+		},
+		Closed: {
+			_enter() {},
+			toggle() {
+				return 'Open';
+			},
+			open() {
+				return 'Open';
+			},
+			highlightNext() {
+				this.open();
+				focusedOptionIdx = 0;
+				tick().then(() => {
+					const focusedElement = optionsList.querySelector('.option.focused');
+					if (focusedElement) {
+						focusedElement.scrollIntoView({
+							behavior: 'smooth',
+							block: 'nearest'
+						});
+					}
+				});
+			},
+			handleKeyboard(e) {
+				if (!inEdit) return;
+
+				if (e.key == 'Escape') {
+					cellState.cancel();
+					return;
+				}
+
+				if (e.key == 'Enter') {
+					if (inputValue?.trim()) {
+						if (multi) {
+							localValue = [...localValue, inputValue.trim()];
+						} else {
+							localValue = [inputValue.trim()];
+						}
+						inputValue = '';
+					}
+				}
+
+				if (controlType == 'select') {
+					this.open();
+					this.handleKeyboard(e);
+					if (e.key == 'ArrowDown' || e.keyCode == 32) this.toggle();
+					if (e.key == 'Backspace' || e.key == 'Delete') {
+						localValue = [];
+						dispatch('change', localValue);
+					}
+				}
+			}
+		}
+	});
+
+	export const cellState = fsm('View', {
+		'*': {
+			goTo(state) {
+				return state;
+			},
+			refresh() {
+				$options = [];
+				optionColors = {};
+				$labels = {};
+				filteredOptions = [];
+				if (optionsSource != 'data') {
+					this.loadOptions(optionsSource);
+				}
+				return optionsSource == 'data' ? 'Loading' : 'View';
+			},
+			reload() {
+				this.loadOptions(optionsSource);
+			},
+			loadSchemaOptions() {
+				try {
+					optionColors = fieldSchema?.optionColors || {};
+					$options = fieldSchema?.constraints?.inclusion || [];
+					$labels = {};
+					filteredOptions = $options;
+				} catch (e) {}
+			},
+			loadDataOptions(rows) {
+				$options = [];
+				$labels = {};
+				let primaryDisplay = labelColumn || labelColumn;
+				if (rows && rows.length) {
+					rows.forEach((row) => {
+						$options.push(row[valueColumn]);
+						$labels[row[valueColumn]] = row[primaryDisplay];
+						if (colorColumn) optionColors[row[valueColumn]] = row[colorColumn];
+					});
+				}
+
+				$options = $options;
+				filteredOptions = $options;
+			},
+			loadCustomOptions() {
+				$options = [];
+				$labels = {};
+				if (customOptions?.length) {
+					customOptions.forEach((row) => {
+						$options.push(row.value || row);
+						$labels[row.value] = row.label || row;
+					});
+				}
+				$options = $options;
+				filteredOptions = $options;
+			},
+			loadOptions(src) {
+				if (src == 'data') {
+					this.loadDataOptions($fetch?.rows);
+				} else if (src == 'custom') {
+					this.loadCustomOptions();
+				} else {
+					this.loadSchemaOptions();
+				}
+			}
+		},
+		Loading: {
+			_enter() {
+				fetch = createFetch($dataSourceStore);
+				loading = true;
+			},
+			_exit() {
+				loading = false;
+			},
+			refresh() {},
+			reload() {},
+			syncFetch(fetch) {
+				if (fetch?.loaded) {
+					return cellOptions.initialState || 'View';
+				}
+			},
+			focus(e) {
+				if (!cellOptions.readonly && !cellOptions.disabled) {
+					return 'Editing';
+				}
+			}
+		},
+		View: {
+			_enter() {
+				searchTerm = null;
+				editorState.filterOptions();
+			},
+			toggle(e) {
+				if (cellOptions.disabled || cellOptions.readonly) return;
+				return 'Editing';
+			},
+			focus(e) {
+				if (!readonly && !disabled) {
+					return 'Editing';
+				}
+			}
+		},
+		Editing: {
+			_enter() {
+				editorState.open();
+
+				setTimeout(() => {
+					editor?.focus();
+				}, 30);
+				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
+				inputValue = multi ? '' : $labels[localValue[0]] || localValue[0] || '';
+
+				dispatch('enteredit');
+			},
+			_exit() {
+				searchTerm = null;
+				inputValue = null;
+				editorState.close();
+				dispatch('exitedit');
+			},
+			toggle(e) {
+				if (!inputSelect && searchTerm) {
+					return;
+				}
+				e.preventDefault();
+				editorState.toggle();
+			},
+			focusout(e) {
+				console.log('focusout', {
+					relatedTarget: e.relatedTarget,
+					anchor,
+					editor
+				});
+				if (anchor.contains(e.relatedTarget)) {
+					return;
+				}
+
+				if (cellOptions.debounce && isDirty) {
+					clearTimeout(timer);
+					dispatch('change', multi ? localValue : localValue[0]);
+					dispatch(
+						'labelChange',
+						multi
+							? localValue.map((val) => $labels[val] || val)
+							: $labels[localValue[0]] || localValue[0]
+					);
+				} else {
+					this.submit();
+				}
+				dispatch('focusout');
+				return 'View';
+			},
+			popupfocusout(e) {
+				console.log('popup focusout', {
+					relatedTarget: e.relatedTarget,
+					anchor,
+					editor
+				});
+				if (anchor != e?.relatedTarget) {
+					this.submit();
+					return 'View';
+				}
+			},
+			submit() {
+				if (isDirty && !cellOptions.debounce) {
+					if (multi) dispatch('change', localValue);
+					else dispatch('change', localValue[0]);
+
+					if (multi) {
+						dispatch(
+							'labelChange',
+							localValue.map((val) => $labels[val] || val)
+						);
+					} else {
+						dispatch('labelChange', $labels[localValue[0]] || localValue[0]);
+					}
+				}
+			},
+			clear() {
+				localValue = [];
+				anchor?.focus();
+				if (cellOptions.debounce) {
+					dispatch('change', null);
+					dispatch('labelChange', null);
+				}
+			},
+			cancel() {
+				localValue = JSON.parse(originalValue);
+				searchTerm = null;
+				anchor?.blur();
+				return 'View';
+			}
+		}
+	});
+
+	const colors = derivedMemo(options, ($options) => {
+		let obj = {};
+		$options.forEach(
+			(option, index) =>
+				(obj[option] = optionColors[option] ?? colorsArray[index % colorsArray.length])
+		);
+		return obj;
+	});
+
+	const colorsArray = [
+		'hsla(175, 90%, 75%, 0.35)',
+		'hsla(25, 90%, 75%, 0.35)',
+		'hsla(340, 85%, 72%, 0.35)',
+		'hsla(75, 80%, 75%, 0.35)',
+		'hsla(265, 85%, 70%, 0.35)',
+		'hsla(125, 90%, 75%, 0.35)',
+		'hsla(0, 90%, 75%, 0.35)',
+		'hsla(225, 90%, 75%, 0.35)',
+		'hsla(100, 80%, 75%, 0.35)',
+		'hsla(315, 85%, 70%, 0.35)',
+		'hsla(50, 80%, 75%, 0.35)',
+		'hsla(165, 85%, 70%, 0.35)',
+		'hsla(200, 90%, 75%, 0.35)',
+		'hsla(290, 85%, 72%, 0.35)',
+		'hsla(85, 85%, 72%, 0.35)',
+		'hsla(140, 85%, 72%, 0.35)',
+		'hsla(250, 90%, 75%, 0.35)',
+		'hsla(35, 85%, 72%, 0.35)',
+		'hsla(190, 85%, 72%, 0.35)',
+		'hsla(350, 90%, 75%, 0.35)',
+		'hsla(60, 85%, 70%, 0.35)',
+		'hsla(150, 90%, 75%, 0.35)',
+		'hsla(300, 90%, 75%, 0.35)',
+		'hsla(10, 85%, 70%, 0.35)',
+		'hsla(215, 85%, 70%, 0.35)',
+		'hsla(325, 90%, 75%, 0.35)',
+		'hsla(115, 85%, 70%, 0.35)',
+		'hsla(240, 85%, 72%, 0.35)',
+		'hsla(275, 90%, 75%, 0.35)'
+	];
+
+	let originalValue = $state('[]');
+
+	let inputSelect = $derived(controlType == 'inputSelect');
+	let defaultQuery = $derived(QueryUtils.buildQuery(filter || []));
+
+	let isObjects = $derived(localValue.length && typeof localValue[0] == 'object' ? true : false);
+	let isEmpty = $derived(localValue.length < 1);
+	let nooptions = $derived(!$options || $options.length < 1);
+	let inEdit = $derived($cellState == 'Editing');
+	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
+	let pills = $derived(optionsViewMode == 'pills');
+	let bullets = $derived(optionsViewMode == 'bullets');
+	let plaintext = $derived(optionsViewMode == 'text');
+	let multi = $derived(fieldSchema && fieldSchema.type ? fieldSchema.type == 'array' : multiProp);
+	let icon = $derived(searchTerm && isEmpty ? 'ph ph-magnifying-glass' : cellOptions.icon);
+	let open = $derived($editorState == 'Open');
+
+	/* 	$effect(() => {
+		dataSourceStore.set(cellOptions?.datasource);
+	});
+
+	$effect(() => {
+		fetch?.update?.({ query: defaultQuery });
+	});
+
+	$effect(() => {
+		cellState.syncFetch($fetch);
+	});
+
+	$effect(() => {
+		cellState.loadDataOptions($fetch?.rows);
+	});
+
+	$effect(() => {
+		cellState.refresh($dataSourceStore, optionsSource);
+	}); */
+
+	/* 	$effect(() => {
+		cellState.reload(fieldSchema, labelColumn, valueColumn, iconColumn, colorColumn, customOptions);
+	});
+
+	$effect(() => {
+		localValue = Array.isArray(value) ? value : value ? [value] : [];
+	}); */
+
+	$effect(() => {
+		if (autofocus) {
+			setTimeout(() => {
+				cellState.focus();
+				editor?.focus();
+			}, 30);
+		}
+
+		return () => {
+			if (timer) {
+				clearTimeout(timer);
+			}
+		};
+	});
+</script>
+
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore event_directive_deprecated -->
+<div
+	bind:this={anchor}
+	class="superCell {role}"
+	{id}
+	tabindex={cellOptions?.disabled ? -1 : 0}
+	class:isDirty={isDirty && showDirty}
+	class:inEdit
+	class:disabled
+	class:readonly
+	class:error
+	class:placeholder={isEmpty && !searchTerm}
+	style:color
+	style:background
+	on:focusin={cellState.focus}
+	on:focusout={cellState.focusout}
+	on:keydown={editorState.handleKeyboard}
+	on:mousedown={cellState.toggle}
+>
+	{#if icon}
+		<i class={icon + ' field-icon'} class:active={searchTerm}></i>
+	{/if}
+
+	{#key $cellState}
+		{#if inEdit && controlType == 'inputSelect'}
+			{#if multi}
+				{#if localValue.length > 0}
+					<div
+						class="value"
+						style:width={'auto'}
+						style:padding-left={cellOptions.icon ? '32px' : padding}
+					>
+						<div class="items" class:pills style:justify-content={align ?? 'flex-start'}>
+							{#each localValue as val (val)}
+								<div class="item" style:--option-color={$colors[val]} style:min-width={'4rem'}>
+									{#if pills}
+										<div class="loope"></div>
+									{/if}
+									<span> {$labels[val] || val} </span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			{/if}
+
+			<input
+				bind:this={editor}
+				class="editor"
+				bind:value={inputValue}
+				on:input={(e) => {
+					if (!multi) localValue[0] = e.target.value?.trim();
+					editorState.filterOptions(e.target.value);
+				}}
+				on:focusout={cellState.focusout}
+				{placeholder}
+			/>
+			<div
+				class="control-icon"
+				style:border-left="1px solid var(--spectrum-global-color-blue-400)"
+				style:padding-left="0.75rem"
+			>
+				<i class="ph ph-caret-down"></i>
+			</div>
+		{:else}
+			<div class="value" class:placeholder={isEmpty && !searchTerm}>
+				{#key isEmpty}
+					{#if localValue?.length < 1}
+						{#if open}
+							{searchTerm ? searchTerm : 'Type to search...'}
+						{:else}
+							{loading
+								? 'Loading...'
+								: nooptions
+									? 'No options'
+									: placeholder
+										? placeholder
+										: 'Select...'}
+						{/if}
+					{:else}
+						<div
+							class="items"
+							class:pills
+							class:bullets
+							style:justify-content={align ?? 'flex-start'}
+						>
+							{#if plaintext}
+								{#each localValue as val, idx (val)}
+									{$labels[val] || val}
+									{idx < localValue.length - 1 ? ', ' : ''}
+								{/each}
+							{:else}
+								{#each localValue as val, idx (val)}
+									<div
+										class="item"
+										style:--option-color={$colors[val] || colorsArray[idx % colorsArray.length]}
+									>
+										<div class="loope"></div>
+										<span> {isObjects ? 'JSON' : $labels[val] || val} </span>
+									</div>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				{/key}
+			</div>
+			{#if !readonly && (role == 'formInput' || inEdit)}
+				<i class="ph ph-caret-down control-icon"></i>
+			{/if}
+		{/if}
+	{/key}
+</div>
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+{#if inEdit}
+	<SuperPopover
+		{anchor}
+		useAnchorWidth
+		minWidth={pickerWidth}
+		align="left"
+		maxHeight={250}
+		{open}
+		on:close={cellState.focusout}
+	>
+		{#snippet children()}
+			<CellPickerFrame>
+				{#if searchTerm && !inputSelect && !isEmpty}
+					<div class="searchControl">
+						<i class="search-icon ph ph-magnifying-glass" class:active={searchTerm}></i>
+						<span class="search-term">{searchTerm}</span>
+					</div>
+				{/if}
+				<CellPickerOptionsList
+					bind:optionsList
+					onMouseLeave={() => (focusedOptionIdx = -1)}
+					onScroll={optionsSource == 'data' ? editorState.handleScroll : undefined}
+				>
+					{#if $fetch?.loading && !$fetch?.loaded}
+						<div class="option loading">
+							<i class="ph ph-spinner spin"></i>
+							Loading...
+						</div>
+					{/if}
+
+					{#if filteredOptions?.length}
+						{#each filteredOptions as option, idx (idx)}
+							<CellPickerOption
+								textMode={optionsViewMode == 'text'}
+								focused={focusedOptionIdx === idx}
+								selected={localValue?.includes(option)}
+								optionColor={$colors[option]}
+								onSelect={() => editorState.toggleOption(idx)}
+								onFocus={() => (focusedOptionIdx = idx)}
+							>
+								<span>
+									<i
+										class={iconColumn
+											? 'ph ph-' + $fetch?.rows?.[idx]?.[iconColumn]
+											: 'ph-fill ph-square'}
+										style:color={$colors[option]}
+									></i>
+									{$labels[option] || option}
+								</span>
+								<i class="ph ph-check"></i>
+							</CellPickerOption>
+						{/each}
+						{#if $fetch?.loading}
+							<div class="option loading">
+								<i class="ph ph-spinner spin"></i>
+								Loading more...
+							</div>
+						{/if}
+					{/if}
+
+					{#if filteredOptions?.length === 0}
+						<div class="option">
+							<span>
+								<i class="ri-close-line"></i>
+								No Options Found
+							</span>
+						</div>
+					{/if}
+				</CellPickerOptionsList>
+			</CellPickerFrame>
+		{/snippet}
+	</SuperPopover>
+{/if}
+
+<style>
+	.searchControl {
+		display: flex;
+		align-items: center;
+		min-height: 2rem;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
+	}
+	:global(.options) {
+		flex: auto;
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		overflow-y: auto;
+		color: var(--spectrum-global-color-gray-700);
+	}
+
+	:global(.option) {
+		min-height: 1.85rem;
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		justify-content: space-between;
+		cursor: pointer;
+		padding: 0rem 0.5rem;
+
+		&.selected {
+			color: var(--spectrum-global-color-gray-800);
+			background-color: var(--spectrum-global-color-gray-75);
+			font-weight: 600;
+		}
+
+		&.focused {
+			background-color: var(--spectrum-global-color-gray-100);
+			color: var(--spectrum-global-color-gray-800);
+		}
+
+		& > span {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+	}
+
+	:global(.option > span > .ph-square) {
+		font-size: 16px;
+		color: var(--option-color, var(--spectrum-global-color-gray-300));
+	}
+	:global(.option.text > span > .ph-square) {
+		display: none;
+	}
+
+	:global(.option .ph-check) {
+		display: none;
+		font-size: 16px;
+		color: var(--spectrum-global-color-green-400);
+	}
+
+	:global(.option.selected .ph-check) {
+		display: inline-block;
+	}
+	:global(.option.loading) {
+		justify-content: center;
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic;
+	}
+
+	.search-icon {
+		font-size: 16px;
+		color: var(--spectrum-global-color-gray-500);
+		display: flex;
+		align-items: center;
+		padding-left: 0.5rem;
+	}
+
+	.search-icon.active {
+		color: var(--spectrum-global-color-blue-700);
+	}
+
+	.search-term {
+		flex: auto;
+		padding-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-700);
+		font-style: italic;
+		font-weight: 500;
+	}
+	:global(.picker) {
+		display: flex;
+		flex-direction: column;
+		max-height: 248px;
+		width: 100%;
+		overflow: hidden;
+	}
+
+	.loope {
+		width: 14px;
+		height: 14px;
+		border-radius: 2px;
+		background-color: var(--option-color, var(--spectrum-global-color-gray-300));
+		flex-shrink: 0;
+	}
+</style>
