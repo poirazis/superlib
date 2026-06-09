@@ -81,7 +81,7 @@
 	{#if clearable}
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<i
-			class="ph ph-x clear-icon"
+			class="ph ph-x control-icon clear-icon"
 			on:mousedown|preventDefault={state.clear}
 			role="button"
 			title="Clear value"
@@ -232,7 +232,7 @@
 		background: var(--spectrum-global-color-gray-50);
 	}
 
-	.copy-icon {
+	:global(.super-cell > .copy-icon) {
 		opacity: 0.45;
 		font-size: 15px;
 		transition:
@@ -242,17 +242,28 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		margin-right: 0.75rem;
+		padding-right: 0.5rem;
 		padding-left: 0.5rem;
 		color: var(--spectrum-global-color-gray-600);
 		border-left: 1px solid var(--spectrum-global-color-gray-300);
 	}
+	:global(.super-cell > .control-icon) {
+		opacity: 0.75;
+		font-size: 15px;
+		transition:
+			color 0.15s ease,
+			opacity 0.15s ease;
+		align-self: stretch;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding-right: 0.5rem;
+		padding-left: 0.5rem;
+		color: var(--spectrum-global-color-gray-700);
+		border-left: 1px solid var(--spectrum-global-color-gray-300);
+	}
 
 	.clear-icon {
-		font-size: 15px;
-		transition: color 0.15s ease;
-		align-self: center;
-		margin-right: 0.5rem;
 		color: var(--spectrum-global-color-red-400);
 		z-index: 1;
 	}

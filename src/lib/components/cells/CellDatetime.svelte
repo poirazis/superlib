@@ -13,13 +13,17 @@
 	let anchor = $state(null);
 	let picker = $state();
 	let timePicker = $state();
+	let dateInput = $state();
 	let open = $state(false);
 	let selection = $state(false);
 	let originalValue = $state();
-	let innerDate = $state(new Date());
+	let innerDate = $state(null);
 	let timeValue = $state('');
+	let editText = $state('');
 
 	let config = $derived(cellOptions ?? {});
+	let controlType = $derived(config.controlType);
+	let inputDate = $derived(controlType === 'inputDate');
 	let currentDateFormat = $derived(config.dateFormat);
 	let currentShowTime = $derived(config.showTime);
 	let ignoreTimeZone = $derived(config.ignoreTimezone);
@@ -49,9 +53,12 @@
 	);
 
 	const parseValueToDate = (valueStr) => {
-		if (!valueStr) return new Date();
-		if (valueStr instanceof Date) return valueStr;
-		return new Date(valueStr);
+		if (valueStr == null || valueStr === '') return null;
+		if (valueStr instanceof Date) {
+			return Number.isNaN(valueStr.getTime()) ? null : valueStr;
+		}
+		const parsed = new Date(valueStr);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
 	};
 
 	const parse12HourTime = (timeStr) => {
@@ -128,6 +135,8 @@
 	};
 
 	const buildOutputValue = () => {
+		if (!innerDate) return null;
+
 		let outputValue = innerDate.toISOString();
 		if (!currentShowTime) {
 			outputValue = innerDate.toLocaleDateString('en-CA');
@@ -139,6 +148,11 @@
 	};
 
 	const syncTimeValue = () => {
+		if (!innerDate) {
+			timeValue = '';
+			return;
+		}
+
 		timeValue = innerDate.toLocaleTimeString('en-US', {
 			hour12: !show24HTime,
 			hour: '2-digit',
@@ -146,23 +160,109 @@
 		});
 	};
 
+	const syncEditTextFromDate = () => {
+		editText = innerDate ? formatDateTime(innerDate, currentDateFormat, currentShowTime) : '';
+	};
+
+	const parseTypedDate = (text, dateFormat) => {
+		if (!text?.trim()) return null;
+
+		const trimmed = text.trim();
+		let day;
+		let month;
+		let year;
+
+		if (dateFormat === 'MM/DD/YYYY') {
+			const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+			if (!match) return null;
+			month = parseInt(match[1], 10) - 1;
+			day = parseInt(match[2], 10);
+			year = parseInt(match[3], 10);
+		} else if (dateFormat === 'YYYY-MM-DD') {
+			const match = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+			if (!match) return null;
+			year = parseInt(match[1], 10);
+			month = parseInt(match[2], 10) - 1;
+			day = parseInt(match[3], 10);
+		} else if (dateFormat === 'DD/MM/YYYY' || !dateFormat || dateFormat === 'default') {
+			const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+			if (!match) return null;
+			day = parseInt(match[1], 10);
+			month = parseInt(match[2], 10) - 1;
+			year = parseInt(match[3], 10);
+		} else {
+			const parsed = new Date(trimmed);
+			return Number.isNaN(parsed.getTime()) ? null : parsed;
+		}
+
+		const date = new Date(year, month, day);
+		if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) {
+			return null;
+		}
+
+		return date;
+	};
+
+	const commitInputDate = () => {
+		if (!inputDate) return null;
+
+		const trimmed = editText.trim();
+		if (trimmed === '') {
+			innerDate = null;
+			timeValue = '';
+			selection = true;
+			return null;
+		}
+
+		const parsed = parseTypedDate(trimmed, currentDateFormat);
+		if (!parsed) {
+			innerDate = parseValueToDate(originalValue);
+			syncEditTextFromDate();
+			syncTimeValue();
+			selection = innerDate != null;
+			return undefined;
+		}
+
+		if (currentShowTime) {
+			parsed.setHours(
+				innerDate.getHours(),
+				innerDate.getMinutes(),
+				innerDate.getSeconds(),
+				innerDate.getMilliseconds()
+			);
+		} else {
+			parsed.setHours(0, 0, 0, 0);
+		}
+
+		innerDate = parsed;
+		syncTimeValue();
+		editText = formatDateTime(innerDate, currentDateFormat, currentShowTime);
+		selection = true;
+		return buildOutputValue();
+	};
+
+	let dateInputPlaceholder = $derived.by(() => {
+		if (placeholder) return placeholder;
+		if (currentDateFormat === 'MM/DD/YYYY') return 'MM/DD/YYYY';
+		if (currentDateFormat === 'YYYY-MM-DD') return 'YYYY-MM-DD';
+		if (currentDateFormat === 'MMM DD, YYYY') return 'MMM DD, YYYY';
+		if (currentDateFormat === 'DD MMM YYYY') return 'DD MMM YYYY';
+		return 'DD/MM/YYYY';
+	});
+
 	let formattedValue = $derived.by(() => {
-		if (config.template && value && value != '' && value != null) {
+		if (!innerDate) return '';
+
+		if (config.template) {
 			return processStringSync(config.template, {
 				value: innerDate
 			});
 		}
-		if ((value && value != '' && value != null) || selection) {
-			return formatDateTime(innerDate, currentDateFormat, currentShowTime);
-		}
-		return '';
+
+		return formatDateTime(innerDate, currentDateFormat, currentShowTime);
 	});
 
-	let displayText = $derived(
-		inEdit ? formattedValue || placeholder : value ? formattedValue || placeholder : placeholder
-	);
-
-	let showPlaceholder = $derived(!formattedValue);
+	let inputShowsPlaceholder = $derived(innerDate == null);
 
 	export const cellState = fsm('view', {
 		'*': {
@@ -222,17 +322,29 @@
 				originalValue = value;
 				innerDate = parseValueToDate(value);
 				syncTimeValue();
-				open = false;
+				if (inputDate) {
+					syncEditTextFromDate();
+					dateInput?.focus();
+				}
+				open = true;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			click() {
+			click(e) {
 				open = !open;
 			},
 			keydown(e) {
+				if (inputDate && dateInput?.contains(e.target)) {
+					if (e.key === 'Escape') {
+						e.preventDefault();
+						this.cancel();
+					}
+					return;
+				}
+
 				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
@@ -242,6 +354,10 @@
 				if (e.code === 'Delete' || e.code === 'Backspace') {
 					e.stopPropagation();
 					e.preventDefault();
+					innerDate = null;
+					editText = '';
+					timeValue = '';
+					selection = true;
 					dispatch('change', null);
 				}
 
@@ -252,40 +368,71 @@
 			focusout(e) {
 				const isInPicker = picker?.contains(e.relatedTarget);
 				const isInTimePicker = timePicker?.contains(e.relatedTarget);
+				const isInDateInput = dateInput?.contains(e.relatedTarget);
 
-				if (isInPicker || isInTimePicker) return;
+				if (isInPicker || isInTimePicker || isInDateInput) return;
 
 				open = false;
-				if (selection) dispatch('change', buildOutputValue());
+				if (inputDate) {
+					const committed = commitInputDate();
+					if (committed === null) {
+						dispatch('change', null);
+					} else if (committed !== undefined) {
+						dispatch('change', committed);
+					}
+				} else if (selection) {
+					dispatch('change', buildOutputValue());
+				}
 				return readonly ? 'readonly' : 'view';
 			},
 			submit() {
-				dispatch('change', buildOutputValue());
+				if (inputDate) {
+					const committed = commitInputDate();
+					if (committed === null) {
+						dispatch('change', null);
+					} else if (committed !== undefined) {
+						dispatch('change', committed);
+					}
+				} else {
+					dispatch('change', buildOutputValue());
+				}
 				return readonly ? 'readonly' : 'view';
 			},
 			cancel() {
 				innerDate = parseValueToDate(originalValue);
 				syncTimeValue();
+				if (inputDate) {
+					syncEditTextFromDate();
+				}
 				open = false;
 				return readonly ? 'readonly' : 'view';
 			}
 		}
 	});
 
+	const ensureInnerDate = () => {
+		if (!innerDate) {
+			innerDate = new Date();
+		}
+		return innerDate;
+	};
+
 	const handleStartTime = () => {
+		const date = ensureInnerDate();
 		const startTime = show24HTime ? '00:00' : '12:00 AM';
 		timeValue = startTime;
-		innerDate.setHours(0, 0, 0, 0);
-		innerDate = new Date(innerDate);
+		date.setHours(0, 0, 0, 0);
+		innerDate = new Date(date);
 		selection = true;
 		anchor?.focus();
 	};
 
 	const handleEndTime = () => {
+		const date = ensureInnerDate();
 		const endTime = show24HTime ? '23:59' : '11:59 PM';
 		timeValue = endTime;
-		innerDate.setHours(23, 59, 0, 0);
-		innerDate = new Date(innerDate);
+		date.setHours(23, 59, 0, 0);
+		innerDate = new Date(date);
 		selection = true;
 		anchor?.focus();
 	};
@@ -302,7 +449,7 @@
 	};
 
 	const handleTimeChange = (e) => {
-		if (!currentShowTime) return;
+		if (!currentShowTime || !innerDate) return;
 		selection = true;
 
 		const newTime = e.target.value;
@@ -314,11 +461,50 @@
 		innerDate = new Date(innerDate);
 	};
 
+	const handleDateInput = (e) => {
+		selection = true;
+		editText = e.target.value;
+
+		const trimmed = editText.trim();
+		if (!trimmed) {
+			innerDate = null;
+			timeValue = '';
+			return;
+		}
+
+		const parsed = parseTypedDate(trimmed, currentDateFormat);
+		if (!parsed) {
+			innerDate = null;
+			return;
+		}
+
+		const previousDate = innerDate;
+
+		if (currentShowTime && previousDate) {
+			parsed.setHours(
+				previousDate.getHours(),
+				previousDate.getMinutes(),
+				previousDate.getSeconds(),
+				previousDate.getMilliseconds()
+			);
+		} else {
+			parsed.setHours(0, 0, 0, 0);
+		}
+
+		innerDate = parsed;
+		syncTimeValue();
+	};
+
+	const togglePicker = (e) => {
+		e.stopPropagation();
+		open = !open;
+	};
+
 	const handleDateChange = (e) => {
 		const newDate = e.detail;
 		selection = true;
 
-		if (currentShowTime) {
+		if (currentShowTime && innerDate) {
 			newDate.setHours(
 				innerDate.getHours(),
 				innerDate.getMinutes(),
@@ -329,7 +515,14 @@
 
 		innerDate = newDate;
 		syncTimeValue();
-		anchor?.focus();
+		if (inputDate) {
+			editText = formatDateTime(innerDate, currentDateFormat, currentShowTime);
+		}
+		if (inputDate) {
+			dateInput?.focus();
+		} else {
+			anchor?.focus();
+		}
 		open = false;
 	};
 
@@ -345,7 +538,11 @@
 		if (autofocus) {
 			setTimeout(() => {
 				cellState.focus();
-				cellState.click?.();
+				if (inputDate) {
+					dateInput?.focus();
+				} else {
+					cellState.click?.();
+				}
 			}, 30);
 		}
 	});
@@ -384,17 +581,28 @@
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
 	{/if}
 
-	<div
-		class="datetime-display"
-		class:placeholder={showPlaceholder}
-		class:inline={baseRole === 'inline'}
-		style:justify-content={align}
-	>
-		<span class:placeholder={showPlaceholder}>{displayText}</span>
-		{#if inEdit}
-			<i class="ph ph-calendar-blank calendar-icon"></i>
-		{/if}
-	</div>
+	<input
+		bind:this={dateInput}
+		type="text"
+		class="editor"
+		disabled={!inputDate}
+		class:placeholder={inputShowsPlaceholder}
+		value={inEdit ? editText : formattedValue}
+		on:input={handleDateInput}
+		on:focusout={cellState.focusout}
+		on:click={(e) => e.stopPropagation()}
+		placeholder={dateInputPlaceholder}
+	/>
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	{#if $cellState === 'editing' || $cellState === 'view'}
+		<i
+			class="ph ph-calendar-blank calendar-icon control-icon"
+			on:click={togglePicker}
+			role="button"
+			tabindex="-1"
+		></i>
+	{/if}
 </BaseCell>
 
 <PickerPopover
@@ -414,7 +622,7 @@
 		style:--date-picker-selected-background="var(--accent-color)"
 	>
 		<!-- svelte-ignore event_directive_deprecated -->
-		<DatePicker value={innerDate} on:select={handleDateChange} />
+		<DatePicker value={innerDate ?? new Date()} on:select={handleDateChange} />
 
 		{#if currentShowTime}
 			<div class="time-section">
@@ -459,20 +667,6 @@
 
 	.datetime-display.inline {
 		padding: 0.25rem;
-	}
-
-	.datetime-display.placeholder,
-	.datetime-display.placeholder > span,
-	.datetime-display > span.placeholder {
-		font-style: italic !important;
-		color: var(--spectrum-global-color-gray-500) !important;
-	}
-
-	.calendar-icon {
-		font-size: 16px;
-		flex-shrink: 0;
-		margin-left: 0.5rem;
-		color: var(--spectrum-global-color-gray-600);
 	}
 
 	.datetime-picker-container {
