@@ -35,7 +35,7 @@
 		multirow = false,
 		placeholder = false,
 		justCopied = false,
-		copyIcon = 'onhover',
+		copyIcon = 'always',
 		grabber = false,
 		popupOpen = false,
 		color,
@@ -71,8 +71,8 @@
 	class:justCopied
 	class:icon-on-hover={$state === 'copyable' && copyIconOnHover}
 	class:open-popup={popupOpen}
-	class:isDirty={isDirty}
-	class:error={error}
+	class:isDirty
+	class:error
 	title={$state === 'copyable' ? 'Click to copy' : undefined}
 	style:color
 	style:background
@@ -283,10 +283,14 @@
 		transition:
 			color 0.15s ease,
 			opacity 0.15s ease;
-		align-self: center;
+		align-self: stretch;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		margin-right: 0.75rem;
-		margin-left: 0.5rem;
+		padding-left: 0.5rem;
 		color: var(--spectrum-global-color-gray-600);
+		border-left: 1px solid var(--spectrum-global-color-gray-300);
 	}
 
 	.clear-icon {

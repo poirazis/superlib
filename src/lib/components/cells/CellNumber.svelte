@@ -2,8 +2,6 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import Textbox from '../UI/elements/Textbox.svelte';
-	import CellNumberWheelWrap from './CellNumberWheelWrap.svelte';
 	import CellNumberStepper from './CellNumberStepper.svelte';
 	import './CellCommon.css';
 
@@ -24,6 +22,7 @@
 
 	let timer = $state();
 	let localValue = $state(null);
+	let editText = $state('');
 	let lastEdit = $state();
 	let errors = $state([]);
 	let editor = $state();
@@ -41,7 +40,7 @@
 	let showDirty = $derived(config.showDirty);
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
-	let copyIcon = $derived(config.copyIcon);
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let align = $derived(config.align ?? 'right');
 	let placeholder = $derived(config.placeholder);
 	let template = $derived(config.template);
@@ -72,7 +71,8 @@
 		return formatted;
 	});
 
-	let clearable = $derived(clearValueEnabled && inEdit && localValue != null && localValue !== '');
+	let clearable = $derived(clearValueEnabled && inEdit && editText !== '');
+	let tabindex = $state(0);
 
 	function formatNumber(num, separator, decimalPlaces) {
 		const parsedNum = typeof num === 'string' ? parseFloat(num) : num;
@@ -99,24 +99,39 @@
 		return result;
 	}
 
+	function normalizeEditText(raw) {
+		return raw.replace(',', '.');
+	}
+
+	function isValidEditText(raw) {
+		return raw === '' || raw === '-' || /^-?\d*\.?\d*$/.test(raw);
+	}
+
+	function hasTooManyDecimals(raw) {
+		if (!raw.includes('.')) return false;
+		return raw.split('.')[1].length > (decimals ?? 0);
+	}
+
+	function isCompleteEditText(raw) {
+		if (raw === '' || raw === '-') return true;
+		return !raw.endsWith('.');
+	}
+
 	function parseEditableValue(raw) {
-		if (raw === '' || raw === '-' || raw == null) return null;
-		const parsed = Number(raw);
+		const normalized = normalizeEditText(raw);
+		if (normalized === '' || normalized === '-' || normalized == null) return null;
+		const parsed = Number(normalized);
 		return Number.isNaN(parsed) ? null : clampValue(Number(parsed.toFixed(decimals ?? 0)));
+	}
+
+	function syncEditTextFromValue() {
+		editText = localValue != null ? String(localValue) : '';
 	}
 
 	export const cellState = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
-			},
-			reset(newValue) {
-				if (newValue == localValue) return;
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
-				lastEdit = undefined;
-				errors = [];
-				return initialState;
 			}
 		},
 		view: {
@@ -129,6 +144,34 @@
 				if (!readonly && !disabled && !calculated) {
 					return 'editing';
 				}
+			},
+			copy() {
+				if (!readonly && !disabled && !calculated) {
+					return 'editing';
+				}
+			},
+			reset(newValue) {
+				if (newValue == localValue) return;
+				const num = Number(value);
+				localValue = isNaN(num) ? null : num;
+				lastEdit = undefined;
+				errors = [];
+				return initialState;
+			}
+		},
+		copyable: {
+			copy() {
+				navigator.clipboard
+					.writeText(formattedValue || String(value ?? ''))
+					.then(() => {
+						justCopied = true;
+						setTimeout(() => {
+							justCopied = false;
+						}, 400);
+					})
+					.catch((err) => {
+						console.error('Failed to copy to clipboard:', err);
+					});
 			}
 		},
 		readonly: {
@@ -147,6 +190,7 @@
 		},
 		editing: {
 			_enter() {
+				syncEditTextFromValue();
 				dispatch('enteredit');
 				setTimeout(() => {
 					editor?.focus();
@@ -158,6 +202,7 @@
 			},
 			focus() {},
 			clear() {
+				editText = '';
 				localValue = null;
 				lastEdit = new Date();
 				dispatch('change', null);
@@ -168,14 +213,17 @@
 				this.submit();
 			},
 			submit() {
-				if (isDirty) {
-					dispatch('change', localValue == null ? null : Number(localValue));
+				const next = parseEditableValue(editText);
+				localValue = next;
+				if (value != next) {
+					dispatch('change', next == null ? null : Number(next));
 				}
 				return initialState;
 			},
 			cancel() {
 				const num = Number(value);
 				localValue = isNaN(num) ? null : num;
+				syncEditTextFromValue();
 				lastEdit = undefined;
 				dispatch('cancel');
 				return initialState;
@@ -203,8 +251,16 @@
 						'ArrowDown'
 					].includes(key)
 				) {
-					if (key === 'Enter') return this.submit();
-					if (key === 'Escape') return this.cancel();
+					if (key === 'Enter') {
+						e.preventDefault();
+						e.stopPropagation();
+						return this.submit();
+					}
+					if (key === 'Escape') {
+						e.preventDefault();
+						e.stopPropagation();
+						return this.cancel();
+					}
 					if (key === 'ArrowUp') {
 						e.preventDefault();
 						this.increment(e);
@@ -218,10 +274,12 @@
 					return;
 				}
 
+				const hasDecimal = input.value.includes('.') || input.value.includes(',');
+
 				if (
-					(key.length === 1 && !/[\d.-]/.test(key)) ||
-					(key === '.' && input.value.includes('.')) ||
-					(key === '.' && (decimals ?? 0) === 0) ||
+					(key.length === 1 && !/[\d.,-]/.test(key)) ||
+					((key === '.' || key === ',') && hasDecimal) ||
+					((key === '.' || key === ',') && (decimals ?? 0) === 0) ||
 					(key === '-' && (input.value.includes('-') || input.selectionStart !== 0))
 				) {
 					e.preventDefault();
@@ -229,39 +287,38 @@
 			},
 			handleInput(e) {
 				const input = e.target;
-				const newValue = input.value;
+				const newValue = normalizeEditText(input.value);
 
-				if (
-					newValue !== '' &&
-					newValue !== '-' &&
-					!/^-?\d*\.?\d*$/.test(newValue)
-				) {
-					input.value = localValue?.toString() ?? '';
+				if (!isValidEditText(newValue)) {
+					input.value = editText;
 					return;
 				}
 
-				if (
-					newValue.includes('.') &&
-					newValue.split('.')[1].length > (decimals ?? 0)
-				) {
-					input.value = localValue?.toString() ?? '';
+				if (hasTooManyDecimals(newValue)) {
+					input.value = editText;
 					return;
 				}
+
+				editText = newValue;
+				input.value = newValue;
 
 				if (newValue === '' || newValue === '-') {
 					localValue = null;
-				} else {
+				} else if (isCompleteEditText(newValue)) {
 					localValue = parseEditableValue(newValue);
-					input.value = localValue?.toString() ?? '';
 				}
 
 				lastEdit = new Date();
-				this.debouncedDispatch();
+
+				if (isCompleteEditText(newValue)) {
+					this.debouncedDispatch();
+				}
 			},
 			increment(e) {
 				const multiplier = e?.shiftKey ? 10 : 1;
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base + stepValue * multiplier).toFixed(decimals ?? 0)));
+				syncEditTextFromValue();
 				lastEdit = new Date();
 				this.debouncedDispatch();
 			},
@@ -269,6 +326,7 @@
 				const multiplier = e?.shiftKey ? 10 : 1;
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base - stepValue * multiplier).toFixed(decimals ?? 0)));
+				syncEditTextFromValue();
 				lastEdit = new Date();
 				this.debouncedDispatch();
 			},
@@ -304,7 +362,9 @@
 	};
 
 	$effect(() => {
-		cellState.reset(value);
+		if ($cellState !== 'editing') {
+			cellState.reset(value);
+		}
 	});
 
 	$effect(() => {
@@ -322,11 +382,15 @@
 	$effect(() => {
 		if (disabled) {
 			cellState.goTo('disabled');
+		} else if (readonly && copyable && value != null && value !== '') {
+			cellState.goTo('copyable');
 		} else if (readonly) {
 			cellState.goTo('readonly');
-		} else if (!inEdit) {
+		} else {
 			cellState.goTo('view');
 		}
+
+		tabindex = readonly || disabled ? -1 : 0;
 	});
 </script>
 
@@ -341,6 +405,7 @@
 	{clearable}
 	{error}
 	{justCopied}
+	{copyIcon}
 	{color}
 	{background}
 >
@@ -348,58 +413,27 @@
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
 	{/if}
 
-	{#if inEdit}
-		<CellNumberWheelWrap onWheel={cellState.handleWheel}>
-			<input
-				bind:this={editor}
-				class="editor"
-				class:placeholder={localValue == null}
-				style:text-align={align}
-				value={localValue ?? ''}
-				{placeholder}
-				on:keydown={cellState.handleKeyboard}
-				on:input={cellState.handleInput}
-				on:focusout={cellState.focusout}
-			/>
-		</CellNumberWheelWrap>
+	<input
+		bind:this={editor}
+		class="editor"
+		class:placeholder={inEdit ? editText === '' : !formattedValue}
+		style:text-align={align}
+		{tabindex}
+		disabled={$cellState != 'editing'}
+		value={inEdit ? editText : formattedValue}
+		{placeholder}
+		on:keydown={cellState.handleKeyboard}
+		on:input={cellState.handleInput}
+		on:focusout={cellState.focusout}
+		on:wheel={(e) => {
+			if (inEdit) cellState.handleWheel(e);
+		}}
+	/>
 
-		{#if showStepper}
-			<CellNumberStepper
-				onIncrement={(e) => cellState.increment(e)}
-				onDecrement={(e) => cellState.decrement(e)}
-			/>
-		{/if}
-	{:else if readonly}
-		<Textbox
-			bind:justCopied
-			value={formattedValue || placeholder}
-			{align}
-			{copyable}
-			{copyIcon}
+	{#if showStepper && inEdit}
+		<CellNumberStepper
+			onIncrement={(e) => cellState.increment(e)}
+			onDecrement={(e) => cellState.decrement(e)}
 		/>
-	{:else}
-		<span
-			class="value-display"
-			class:placeholder={!formattedValue}
-			style:text-align={align}
-		>
-			{formattedValue || placeholder}
-		</span>
 	{/if}
 </BaseCell>
-
-<style>
-	.value-display {
-		flex: 1 1 auto;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		padding: 0.25rem 0.75rem;
-	}
-
-	.value-display.placeholder {
-		font-style: italic;
-		color: var(--spectrum-global-color-gray-600);
-	}
-</style>

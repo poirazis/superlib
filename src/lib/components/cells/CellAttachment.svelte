@@ -51,7 +51,7 @@
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
-	let copyIcon = $derived(config.copyIcon ?? 'onhover');
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let baseRole = $derived(mapCellRole(config.role));
 
 	let justCopied = $state(false);

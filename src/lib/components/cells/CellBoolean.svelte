@@ -40,7 +40,7 @@
 	let align = $derived(config.align ?? 'flex-start');
 	let showFalse = $derived(config.showFalse);
 	let copyable = $derived(config.copyable);
-	let copyIcon = $derived(config.copyIcon ?? 'onhover');
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 
 	let justCopied = $state(false);
 	let error = $derived(optionError);

@@ -42,7 +42,7 @@
 	let showDirty = $derived(config.showDirty);
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
-	let copyIcon = $derived(config.copyIcon ?? 'onhover');
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let disabled = $derived(config.disabled);
 	let valueSuffix = $derived(config.valueSuffix ?? '');
 	let tickCount = $derived(Math.max(2, config.tickCount ?? 7));

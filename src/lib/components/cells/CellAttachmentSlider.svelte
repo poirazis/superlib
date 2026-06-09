@@ -51,7 +51,7 @@
 	let disabled = $derived(config.disabled);
 	let readonly = $derived(config.readonly);
 	let copyable = $derived(config.copyable);
-	let copyIcon = $derived(config.copyIcon ?? 'onhover');
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let canSelect = $derived(!readonly && !disabled && !isGallery);
 
 	let justCopied = $state(false);
