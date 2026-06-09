@@ -10,8 +10,8 @@
 		normalizeAttachments,
 		uploadAttachments,
 		type AttachmentItem
-	} from './attachmentUtils';
-	import { copyTextToClipboard } from './cellClipboard';
+	} from './attachmentUtils.js';
+	import { copyTextToClipboard } from './cellClipboard.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -57,7 +57,6 @@
 	let baseRole = $derived(mapCellRole(config.role));
 
 	let justCopied = $state(false);
-	let inEdit = $derived($cellState === 'editing');
 	let error = $derived(optionError);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(
@@ -119,7 +118,10 @@
 				open = false;
 			},
 			click() {
-				copyTextToClipboard(attachmentCopyText(localvalue), (copied) => (justCopied = copied));
+				copyTextToClipboard(
+					attachmentCopyText(localvalue),
+					(copied: boolean) => (justCopied = copied)
+				);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -190,6 +192,8 @@
 			}
 		}
 	});
+
+	let inEdit = $derived($cellState === 'editing');
 
 	$effect(() => {
 		localvalue = normalizeAttachments(value, multi);

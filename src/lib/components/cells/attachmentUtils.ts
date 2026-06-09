@@ -21,7 +21,8 @@ export function normalizeAttachments(
 ): AttachmentItem[] {
 	if (!value) return [];
 	if (multi) return Array.isArray(value) ? value : [value];
-	return [value];
+	const item = Array.isArray(value) ? value[0] : value;
+	return item ? [item] : [];
 }
 
 export async function uploadAttachments(

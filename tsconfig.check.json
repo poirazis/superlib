@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"checkJs": false
+	},
+	"include": [
+		"src/lib/components/Button.svelte",
+		"src/lib/components/SuperLightbox/SuperLightbox.svelte",
+		"src/lib/components/cells/BaseCell.svelte",
+		"src/lib/components/cells/CellAttachment.svelte",
+		"src/lib/components/cells/CellAttachmentExpanded.svelte",
+		"src/lib/components/cells/CellAttachmentSlider.svelte",
+		"src/lib/components/cells/attachmentUtils.ts",
+		"src/lib/components/cells/cellClipboard.ts"
+	]
+}

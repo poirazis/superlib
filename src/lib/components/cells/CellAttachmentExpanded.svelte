@@ -11,8 +11,8 @@
 		normalizeAttachments,
 		uploadAttachments,
 		type AttachmentItem
-	} from './attachmentUtils';
-	import { copyTextToClipboard } from './cellClipboard';
+	} from './attachmentUtils.js';
+	import { copyTextToClipboard } from './cellClipboard.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -61,7 +61,6 @@
 	let onClickAction = $derived(config.onClickAction);
 
 	let justCopied = $state(false);
-	let inEdit = $derived($cellState === 'editing');
 	let canSelect = $derived(!readonly && !disabled && !isGallery);
 	let canDelete = $derived(!readonly && !disabled && !isGallery);
 	let slotted = $derived(config.slotted);
@@ -210,7 +209,10 @@
 		copyable: {
 			_enter() {},
 			click() {
-				copyTextToClipboard(attachmentCopyText(localvalue), (copied) => (justCopied = copied));
+				copyTextToClipboard(
+					attachmentCopyText(localvalue),
+					(copied: boolean) => (justCopied = copied)
+				);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -257,6 +259,8 @@
 			}
 		}
 	});
+
+	let inEdit = $derived($cellState === 'editing');
 
 	$effect(() => {
 		localvalue = normalizeAttachments(value, multi);

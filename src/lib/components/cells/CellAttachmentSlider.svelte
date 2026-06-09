@@ -13,8 +13,8 @@
 		normalizeAttachments,
 		uploadAttachments,
 		type AttachmentItem
-	} from './attachmentUtils';
-	import { copyTextToClipboard } from './cellClipboard';
+	} from './attachmentUtils.js';
+	import { copyTextToClipboard } from './cellClipboard.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -167,7 +167,10 @@
 		copyable: {
 			_enter() {},
 			click() {
-				copyTextToClipboard(attachmentCopyText(localvalue), (copied) => (justCopied = copied));
+				copyTextToClipboard(
+					attachmentCopyText(localvalue),
+					(copied: boolean) => (justCopied = copied)
+				);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
