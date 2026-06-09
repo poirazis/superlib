@@ -24,6 +24,7 @@
 	let isInitialLoad = $state(true);
 	let hasMoreData = $state(true);
 	let optionRefs = $state([]);
+	// svelte-ignore state_referenced_locally
 	let currentLimit = $state(initLimit);
 	let searchFilter = $state();
 	let searchExtensions = $state({});

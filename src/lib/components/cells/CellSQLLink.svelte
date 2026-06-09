@@ -20,6 +20,7 @@
 		children
 	} = $props();
 
+	// svelte-ignore state_referenced_locally
 	let originalValue = $state(JSON.stringify(value));
 	let anchor = $state();
 	let popup = $state();
@@ -57,6 +58,7 @@
 		}
 	});
 
+	// svelte-ignore state_referenced_locally
 	export const cellState = fsm(cellOptions?.initialState ?? 'View', {
 		'*': {
 			goTo(state) {

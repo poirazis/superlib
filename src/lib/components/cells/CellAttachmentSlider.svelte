@@ -240,11 +240,13 @@
 					height={'100%'}
 				>
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div slot="prev" let:showPrevPage on:click={showPrevPage} class="slider-navbutton">
 						<i class="ph ph-caret-left"></i>
 					</div>
 					{#each localvalue as attachment, idx (idx)}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="slider-item" style:height={'100%'} on:click={() => onItemClick(idx)}>
 							{#if isImage(attachment)}
 								<div
@@ -268,6 +270,7 @@
 						</div>
 					{/each}
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div slot="next" let:showNextPage on:click={showNextPage} class="slider-navbutton">
 						<i class="ph ph-caret-right"></i>
 					</div>

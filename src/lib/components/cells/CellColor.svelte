@@ -365,6 +365,7 @@
 				<div class="colors">
 					{#each category.colors as colorName}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<!-- svelte-ignore event_directive_deprecated -->
 						<div
 							on:click={() => onChange(`var(--spectrum-global-color-${colorName})`)}
 							on:keydown={(event) => handleKeydown(event, colorName, false)}
@@ -395,6 +396,7 @@
 				<div class="colors">
 					{#each customCategory.colors as colorName}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<!-- svelte-ignore event_directive_deprecated -->
 						<div
 							on:click={() => onChange(colorName)}
 							on:keydown={(event) => handleKeydown(event, colorName, true)}
@@ -420,6 +422,7 @@
 			<div class="category category--custom">
 				<div class="heading">Custom</div>
 				<div class="custom">
+					<!-- svelte-ignore event_directive_deprecated -->
 					<input
 						type="text"
 						class="custom-input"
@@ -430,6 +433,7 @@
 						placeholder="Enter custom color"
 					/>
 					<!-- svelte-ignore a11y_consider_explicit_label -->
+					<!-- svelte-ignore event_directive_deprecated -->
 					<button class="clear-value" on:click={() => onChange(null)}>
 						<i class="ri-close-line"></i>
 					</button>

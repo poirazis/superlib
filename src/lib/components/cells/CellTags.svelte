@@ -80,6 +80,7 @@
 	let showDirty = $derived(config.showDirty);
 	let align = $derived(config.align);
 
+	// svelte-ignore state_referenced_locally
 	const dataSourceStore = memo(config?.datasource ?? {});
 	let fetch = $state();
 
@@ -590,11 +591,13 @@
 	<div bind:this={editor} class="editor" tabindex="-1">
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore event_directive_deprecated -->
 		<div class="searchControl" on:keydown={editorState.handleInputKeyboard}>
 			<i
 				class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
 				class:actionIcon={true}
 			></i>
+			<!-- svelte-ignore event_directive_deprecated -->
 			<input
 				type="text"
 				placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
@@ -607,6 +610,8 @@
 		</div>
 
 		{#if suggestions}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
 			<div
 				bind:this={picker}
 				class="options"
@@ -623,6 +628,8 @@
 				{:else if filteredOptions?.length}
 					{#each filteredOptions as option, idx (idx)}
 						{#if !localValue?.includes(option)}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<!-- svelte-ignore event_directive_deprecated -->
 							<div
 								class="option"
 								class:text={optionsViewMode == 'text'}

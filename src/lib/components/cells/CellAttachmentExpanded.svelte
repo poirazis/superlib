@@ -284,6 +284,7 @@
 			{#if localvalue?.length}
 				{#each localvalue as attachment, idx (idx)}
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div
 						class="attachment"
 						class:focused={focusedOptionIdx === idx}
@@ -336,11 +337,13 @@
 		</div>
 	{:else if controlType == 'carousel'}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="carousel" on:keydown={handleCarouselKeydown}>
 			{#if localvalue?.length}
 				<div class="carousel-content">
 					{#if isImage(localvalue[currentIndex])}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
 							class="carousel-image"
 							class:selected={selectedIndices.has(currentIndex)}

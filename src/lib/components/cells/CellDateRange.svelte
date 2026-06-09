@@ -431,6 +431,7 @@
 
 				{#if currentShowTime}
 					<div class="time-section">
+						<!-- svelte-ignore event_directive_deprecated -->
 						<input
 							bind:this={fromTimePicker}
 							type="time"
@@ -451,6 +452,7 @@
 
 				{#if currentShowTime}
 					<div class="time-section">
+						<!-- svelte-ignore event_directive_deprecated -->
 						<input
 							bind:this={toTimePicker}
 							type="time"

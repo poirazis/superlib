@@ -20,6 +20,7 @@
 		isUserSelect = false
 	} = $props();
 
+	// svelte-ignore state_referenced_locally
 	let originalValue = $state(JSON.stringify(value));
 	let anchor = $state();
 	let popup = $state();
@@ -49,6 +50,7 @@
 	let placeholder = $derived(config.placeholder || '');
 	let readonly = $derived(config.readonly || config.disabled);
 
+	// svelte-ignore state_referenced_locally
 	export const cellState = fsm(cellOptions?.initialState ?? 'View', {
 		'*': {
 			goTo(state) {
@@ -260,6 +262,7 @@
 
 <PickerPopover {anchor} visible={inEdit} useAnchorWidth open={$editorState == 'Open'}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore event_directive_deprecated -->
 	<div
 		class="picker-container"
 		bind:this={popup}

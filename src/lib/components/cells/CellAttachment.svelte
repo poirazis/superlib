@@ -264,6 +264,8 @@
 		{#if localvalue?.length}
 			{#each localvalue as attachment, idx (idx)}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<!-- svelte-ignore event_directive_deprecated -->
 				<div
 					class="attachment"
 					class:focused={focusedOptionIdx === idx}
@@ -310,6 +312,7 @@
 			<i class="ph ph-plus"></i> Add Attachment
 		</button>
 
+		<!-- svelte-ignore event_directive_deprecated -->
 		<input
 			bind:this={fileInput}
 			type="file"

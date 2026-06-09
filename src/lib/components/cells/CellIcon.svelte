@@ -262,6 +262,7 @@
 			{#if showCategories}
 				<div class="category-tabs">
 					{#each categories as category}
+						<!-- svelte-ignore event_directive_deprecated -->
 						<button
 							class:selected={selectedCategory === category.id}
 							on:click={() => (selectedCategory = category.id)}
@@ -282,6 +283,7 @@
 					aria-label="Search icons"
 				/>
 				{#if searchQuery}
+					<!-- svelte-ignore event_directive_deprecated -->
 					<button
 						class="clear-search"
 						on:click={() => (searchQuery = '')}
@@ -305,6 +307,7 @@
 				>
 					<div class="icons-row" {style}>
 						{#each rowIcons as iconId}
+							<!-- svelte-ignore event_directive_deprecated -->
 							<button
 								class="icon-button"
 								class:selected={iconName === iconId}
@@ -328,6 +331,7 @@
 
 		<div class="footer">
 			{#if value}
+				<!-- svelte-ignore event_directive_deprecated -->
 				<button class="clear-button" on:click={clearSelection}>
 					<i class="ph ph-x"></i> Clear
 				</button>
