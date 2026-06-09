@@ -128,15 +128,11 @@
 			<div
 				class="modal-image-container"
 				class:selected={selectedIndices.has(currentIndex)}
-				aria-label="Image {currentIndex + 1} of {items?.length || 1}. Use arrow keys to navigate, Home/End for first/last, numbers 1-9 to jump to images, Space for next, Escape to close."
+				aria-label="Image {currentIndex + 1} of {items?.length ||
+					1}. Use arrow keys to navigate, Home/End for first/last, numbers 1-9 to jump to images, Space for next, Escape to close."
 			>
 				<!-- svelte-ignore event_directive_deprecated -->
-				<button
-					class="modal-close"
-					on:click={closeModal}
-					aria-label="Close modal"
-					type="button"
-				>
+				<button class="modal-close" on:click={closeModal} aria-label="Close modal" type="button">
 					&times;
 				</button>
 				{#if isImage(currentItem)}
@@ -194,10 +190,7 @@
 								aria-label={selectedIndices.has(currentIndex) ? 'Deselect' : 'Select'}
 								type="button"
 							>
-								<i
-									class="ph {selectedIndices.has(currentIndex)
-										? 'ph-check-square'
-										: 'ph-square'}"
+								<i class="ph {selectedIndices.has(currentIndex) ? 'ph-check-square' : 'ph-square'}"
 								></i>
 							</button>
 						{/if}

@@ -106,7 +106,10 @@
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(!!lastEdit && normalizedValue !== localValue);
 	let clearable = $derived(
-		config.role != 'tableCell' && $cellState === 'editing' && localValue != null && localValue !== ''
+		config.role != 'tableCell' &&
+			$cellState === 'editing' &&
+			localValue != null &&
+			localValue !== ''
 	);
 
 	export const cellState = fsm('view', {

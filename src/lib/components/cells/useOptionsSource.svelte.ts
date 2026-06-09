@@ -41,7 +41,10 @@ export function useOptionsSource({
 			rows?: Array<Record<string, unknown>>;
 			definition?: { primaryDisplay?: string };
 		};
-		memo: <T>(initial: T) => { subscribe: (fn: (value: T) => void) => () => void; set: (value: T) => void };
+		memo: <T>(initial: T) => {
+			subscribe: (fn: (value: T) => void) => () => void;
+			set: (value: T) => void;
+		};
 		derivedMemo: <T, R>(
 			source: { subscribe: (fn: (value: T) => void) => () => void },
 			fn: (value: T) => R
@@ -182,7 +185,11 @@ export function useOptionsSource({
 	const buildSearchFilter = (term?: string | null) => {
 		let appliedFilter: Record<string, unknown> = {};
 
-		if (config.filter && typeof config.filter === 'object' && Object.keys(config.filter).length > 0) {
+		if (
+			config.filter &&
+			typeof config.filter === 'object' &&
+			Object.keys(config.filter).length > 0
+		) {
 			appliedFilter = JSON.parse(JSON.stringify(config.filter));
 		} else {
 			appliedFilter = {

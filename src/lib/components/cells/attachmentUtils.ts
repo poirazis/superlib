@@ -42,9 +42,7 @@ export function mapCellRole(role?: string) {
 	return 'form';
 }
 
-export function attachmentCopyText(
-	attachments: AttachmentItem[] | null | undefined
-): string {
+export function attachmentCopyText(attachments: AttachmentItem[] | null | undefined): string {
 	if (!attachments?.length) return '';
 	return attachments
 		.map((item) => item?.name || item?.url || '')

@@ -50,9 +50,7 @@
 	let stepValue = $derived(config.stepSize ?? config.step ?? 1);
 	let min = $derived(config.min);
 	let max = $derived(config.max);
-	let clearValueEnabled = $derived(
-		config.clearValue !== false && config.role != 'tableCell'
-	);
+	let clearValueEnabled = $derived(config.clearValue !== false && config.role != 'tableCell');
 
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
@@ -243,15 +241,9 @@
 				const key = e.key;
 
 				if (
-					[
-						'Enter',
-						'Escape',
-						'ArrowLeft',
-						'ArrowRight',
-						'Tab',
-						'ArrowUp',
-						'ArrowDown'
-					].includes(key)
+					['Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'Tab', 'ArrowUp', 'ArrowDown'].includes(
+						key
+					)
 				) {
 					if (key === 'Enter') {
 						e.preventDefault();

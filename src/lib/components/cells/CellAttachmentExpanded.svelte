@@ -22,7 +22,9 @@
 		view: { attachment: AttachmentItem; index: number };
 	}>();
 
-	const sdk = getContext<{ API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> } }>('sdk');
+	const sdk = getContext<{
+		API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> };
+	}>('sdk');
 
 	let {
 		value,
@@ -239,7 +241,10 @@
 			submit(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!picker?.contains(related)) {
-					if (JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(originalValue, multi))) {
+					if (
+						JSON.stringify(localvalue) !==
+						JSON.stringify(normalizeAttachments(originalValue, multi))
+					) {
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
@@ -283,7 +288,6 @@
 	{color}
 	{background}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-
 >
 	{#if controlType == 'list'}
 		<div class="attachments" bind:this={picker}>
@@ -368,7 +372,7 @@
 											on:click|stopPropagation={carouselPrev}
 											aria-label="Previous attachment"
 											type="button"
-											disabled={disabled}
+											{disabled}
 										>
 											<i class="ph ph-caret-left"></i>
 										</button>
@@ -381,7 +385,7 @@
 													on:click|stopPropagation={() => carouselGoTo(idx)}
 													aria-label="Go to attachment {idx + 1}"
 													type="button"
-													disabled={disabled}
+													{disabled}
 												></button>
 											{/each}
 										</div>
@@ -391,7 +395,7 @@
 											on:click|stopPropagation={carouselNext}
 											aria-label="Next attachment"
 											type="button"
-											disabled={disabled}
+											{disabled}
 										>
 											<i class="ph ph-caret-right"></i>
 										</button>
@@ -402,7 +406,7 @@
 											on:click|stopPropagation={() => openModal(currentIndex)}
 											aria-label="Full Screen"
 											type="button"
-											disabled={disabled}
+											{disabled}
 										>
 											<i class="ph ph-arrows-out-simple"></i>
 										</button>
@@ -561,7 +565,12 @@
 	{#if selectedIndices.size > 0 && controlType === 'grid' && !readonly && !isGallery}
 		<div class="bulk-actions-overlay">
 			<!-- svelte-ignore event_directive_deprecated -->
-			<button class="btn-bulk-action btn-close" on:click={clearSelection} type="button" title="Clear Selection">
+			<button
+				class="btn-bulk-action btn-close"
+				on:click={clearSelection}
+				type="button"
+				title="Clear Selection"
+			>
 				<i class="ph ph-x"></i>
 			</button>
 			<span class="selection-count">

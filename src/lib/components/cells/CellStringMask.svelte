@@ -114,9 +114,7 @@
 	}
 
 	let placeholder = $derived(config.placeholder || mask || '');
-	let error = $derived(
-		optionError || errors.length > 0 || !!(localValue && mask && !isComplete)
-	);
+	let error = $derived(optionError || errors.length > 0 || !!(localValue && mask && !isComplete));
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(originalValue !== localValue);
 	let inEdit = $derived($cellState === 'editing');
@@ -254,11 +252,7 @@
 					'Home',
 					'End'
 				];
-				if (
-					isComplete &&
-					!allowedKeysWhenComplete.includes(e.key) &&
-					e.key.length === 1
-				) {
+				if (isComplete && !allowedKeysWhenComplete.includes(e.key) && e.key.length === 1) {
 					e.preventDefault();
 					return;
 				}
@@ -270,8 +264,7 @@
 					const tempMask = createMaskInstance(mask);
 					if (tempMask) {
 						const placeholderChar =
-							tempMask.blocks?.[0]?.placeholder ||
-							(tempMask.mask?.includes('0') ? '0' : null);
+							tempMask.blocks?.[0]?.placeholder || (tempMask.mask?.includes('0') ? '0' : null);
 						if (placeholderChar === '0' && !/\d/.test(e.key)) {
 							e.preventDefault();
 						}
@@ -420,9 +413,7 @@
 				class="editor"
 				{placeholder}
 				disabled={false}
-				style:color={!isComplete
-					? 'var(--spectrum-global-color-gray-700)'
-					: color}
+				style:color={!isComplete ? 'var(--spectrum-global-color-gray-700)' : color}
 				style:text-align={config.align == 'center'
 					? 'center'
 					: config.align == 'flex-end' || config.align == 'right'

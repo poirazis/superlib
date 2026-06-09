@@ -24,10 +24,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<li
-	on:click={() => onSelect(draggableItem.id)}
-	bind:this={anchorEl}
->
+<li on:click={() => onSelect(draggableItem.id)} bind:this={anchorEl}>
 	{#if showHandle}
 		<div
 			class="handle"
@@ -53,9 +50,7 @@
 		<span>{itemLabel || draggableItem.item}</span>
 	</div>
 	{#if !reorderOnly && inEdit}
-		<i
-			class="ph ph-trash-simple"
-			on:mousedown|preventDefault={() => onRemove(draggableItem.id)}
+		<i class="ph ph-trash-simple" on:mousedown|preventDefault={() => onRemove(draggableItem.id)}
 		></i>
 	{/if}
 </li>

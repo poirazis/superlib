@@ -539,7 +539,8 @@
 								{#each localValue as val, idx (val)}
 									<div
 										class="item"
-										style:--option-color={$colors[val] || OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
+										style:--option-color={$colors[val] ||
+											OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
 									>
 										<div class="loope"></div>
 										<span> {isObjects ? 'JSON' : $labels[val] || val} </span>
@@ -559,71 +560,65 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	minWidth={pickerWidth}
-	{open}
-	onClose={cellState.focusout}
->
+<PickerPopover {anchor} visible={inEdit} minWidth={pickerWidth} {open} onClose={cellState.focusout}>
 	<CellPickerFrame>
-				{#if searchTerm && !inputSelect && !isEmpty}
-					<div class="searchControl">
-						<i class="search-icon ph ph-magnifying-glass" class:active={searchTerm}></i>
-						<span class="search-term">{searchTerm}</span>
+		{#if searchTerm && !inputSelect && !isEmpty}
+			<div class="searchControl">
+				<i class="search-icon ph ph-magnifying-glass" class:active={searchTerm}></i>
+				<span class="search-term">{searchTerm}</span>
+			</div>
+		{/if}
+		<CellPickerOptionsList
+			bind:optionsList
+			onMouseLeave={() => (focusedOptionIdx = -1)}
+			onScroll={optionsSource == 'data' ? editorState.handleScroll : undefined}
+		>
+			{#if fetch?.loading && !fetch?.loaded}
+				<div class="option loading">
+					<i class="ph ph-spinner spin"></i>
+					Loading...
+				</div>
+			{/if}
+
+			{#if source.filteredOptions?.length}
+				{#each source.filteredOptions as option, idx (idx)}
+					<CellPickerOption
+						textMode={optionsViewMode == 'text'}
+						focused={focusedOptionIdx === idx}
+						selected={localValue?.includes(option)}
+						optionColor={$colors[option]}
+						onSelect={() => editorState.toggleOption(idx)}
+						onFocus={() => (focusedOptionIdx = idx)}
+					>
+						<span>
+							<i
+								class={iconColumn
+									? 'ph ph-' + fetch?.rows?.[idx]?.[iconColumn]
+									: 'ph-fill ph-square'}
+								style:color={$colors[option]}
+							></i>
+							{$labels[option] || option}
+						</span>
+						<i class="ph ph-check"></i>
+					</CellPickerOption>
+				{/each}
+				{#if fetch?.loading}
+					<div class="option loading">
+						<i class="ph ph-spinner spin"></i>
+						Loading more...
 					</div>
 				{/if}
-				<CellPickerOptionsList
-					bind:optionsList
-					onMouseLeave={() => (focusedOptionIdx = -1)}
-					onScroll={optionsSource == 'data' ? editorState.handleScroll : undefined}
-				>
-					{#if fetch?.loading && !fetch?.loaded}
-						<div class="option loading">
-							<i class="ph ph-spinner spin"></i>
-							Loading...
-						</div>
-					{/if}
+			{/if}
 
-					{#if source.filteredOptions?.length}
-						{#each source.filteredOptions as option, idx (idx)}
-							<CellPickerOption
-								textMode={optionsViewMode == 'text'}
-								focused={focusedOptionIdx === idx}
-								selected={localValue?.includes(option)}
-								optionColor={$colors[option]}
-								onSelect={() => editorState.toggleOption(idx)}
-								onFocus={() => (focusedOptionIdx = idx)}
-							>
-								<span>
-									<i
-										class={iconColumn
-											? 'ph ph-' + fetch?.rows?.[idx]?.[iconColumn]
-											: 'ph-fill ph-square'}
-										style:color={$colors[option]}
-									></i>
-									{$labels[option] || option}
-								</span>
-								<i class="ph ph-check"></i>
-							</CellPickerOption>
-						{/each}
-						{#if fetch?.loading}
-							<div class="option loading">
-								<i class="ph ph-spinner spin"></i>
-								Loading more...
-							</div>
-						{/if}
-					{/if}
-
-					{#if source.filteredOptions?.length === 0}
-						<div class="option">
-							<span>
-								<i class="ri-close-line"></i>
-								No Options Found
-							</span>
-						</div>
-					{/if}
-				</CellPickerOptionsList>
+			{#if source.filteredOptions?.length === 0}
+				<div class="option">
+					<span>
+						<i class="ri-close-line"></i>
+						No Options Found
+					</span>
+				</div>
+			{/if}
+		</CellPickerOptionsList>
 	</CellPickerFrame>
 </PickerPopover>
 

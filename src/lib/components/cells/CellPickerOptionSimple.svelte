@@ -1,12 +1,5 @@
 <script>
-	let {
-		focused = false,
-		selected = false,
-		optionColor,
-		onSelect,
-		onFocus,
-		children
-	} = $props();
+	let { focused = false, selected = false, optionColor, onSelect, onFocus, children } = $props();
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->

@@ -18,14 +18,10 @@
 	let tooltipTimer = $state();
 
 	let selected = $derived(
-		tree.isGroup
-			? selectedGroups.includes(tree.id)
-			: !!selectedNodes.find((x) => x.id == tree.id)
+		tree.isGroup ? selectedGroups.includes(tree.id) : !!selectedNodes.find((x) => x.id == tree.id)
 	);
 
-	let isOverflowing = $derived(
-		labelElement && labelElement.scrollWidth > labelElement.clientWidth
-	);
+	let isOverflowing = $derived(labelElement && labelElement.scrollWidth > labelElement.clientWidth);
 
 	let tooltip = $derived(isOverflowing ? tree.label || 'Not Set' : null);
 
@@ -92,11 +88,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<li
-	class="spectrum-TreeView-item"
-	class:is-disabled={tree.disabled}
-	class:is-open={open}
->
+<li class="spectrum-TreeView-item" class:is-disabled={tree.disabled} class:is-open={open}>
 	<div class="spectrum-TreeView-itemLink" style:padding-right={'0.5rem'}>
 		<i
 			class={'ri-arrow-right-s-line'}

@@ -243,9 +243,7 @@
 			class="search"
 			class:placeholder={!filterTerm}
 			type="text"
-			placeholder={$optionsFetch?.loading &&
-			!$optionsFetch?.rows?.length &&
-			isInitialLoad
+			placeholder={$optionsFetch?.loading && !$optionsFetch?.rows?.length && isInitialLoad
 				? 'Loading...'
 				: 'Search'}
 			on:input={handleSearch}
@@ -261,7 +259,11 @@
 			on:scroll={handleScroll}
 		>
 			{#if relatedColumns && relatedColumns.length > 1}
-				<div class="grid-container" style="--grid-template: {gridTemplate}" on:scroll={handleScroll}>
+				<div
+					class="grid-container"
+					style="--grid-template: {gridTemplate}"
+					on:scroll={handleScroll}
+				>
 					<div class="header-row">
 						{#each relatedColumns as col}
 							<div class="header-cell">

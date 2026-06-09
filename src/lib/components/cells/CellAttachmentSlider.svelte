@@ -23,7 +23,9 @@
 		focusout: void;
 	}>();
 
-	const sdk = getContext<{ API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> } }>('sdk');
+	const sdk = getContext<{
+		API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> };
+	}>('sdk');
 
 	let {
 		value,
@@ -230,7 +232,6 @@
 	{color}
 	{background}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-
 >
 	<div class="slider">
 		{#if localvalue?.length}

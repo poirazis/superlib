@@ -57,7 +57,8 @@
 		let obj = {};
 		$options.forEach(
 			(option, index) =>
-				(obj[option] = optionColors[option] ?? OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length])
+				(obj[option] =
+					optionColors[option] ?? OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length])
 		);
 		return obj;
 	});
@@ -168,8 +169,7 @@
 		},
 		Loading: {
 			_enter() {
-				if (!suggestions || $fetch?.loaded)
-					this.goTo.debounce(5, config.initialState || 'View');
+				if (!suggestions || $fetch?.loaded) this.goTo.debounce(5, config.initialState || 'View');
 			},
 			_exit() {
 				if (config.suggestions) this.loadDataOptions($fetch?.rows);
@@ -193,9 +193,7 @@
 		},
 		Editing: {
 			_enter() {
-				originalValue = JSON.stringify(
-					Array.isArray(value) ? value : value ? [value] : []
-				);
+				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
 				this.clearFilters();
 				editorState.open();
 				dispatch('enteredit');
@@ -367,8 +365,7 @@
 					return;
 				}
 				if (e.key == 'ArrowDown') this.highlightNext(e.stopPropagation());
-				if (e.key == 'ArrowUp')
-					this.highlightPrevious(e.preventDefault(), e.stopPropagation());
+				if (e.key == 'ArrowUp') this.highlightPrevious(e.preventDefault(), e.stopPropagation());
 				if (e.key == 'Escape') {
 					cellState.cancel();
 				}
@@ -560,7 +557,8 @@
 				{#each localValue as tag, idx (tag)}
 					<div
 						class="tag"
-						style:--option-color={$colors[tag] || OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
+						style:--option-color={$colors[tag] ||
+							OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
 					>
 						<span class="tag-wrap">
 							<span> {tag} </span>
@@ -587,7 +585,14 @@
 	</div>
 </div>
 
-<PickerPopover {anchor} visible={inEdit} useAnchorWidth maxHeight={250} {open} onClose={cellState.focusout}>
+<PickerPopover
+	{anchor}
+	visible={inEdit}
+	useAnchorWidth
+	maxHeight={250}
+	{open}
+	onClose={cellState.focusout}
+>
 	<div bind:this={editor} class="editor" tabindex="-1">
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->

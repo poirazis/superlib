@@ -126,9 +126,7 @@
 			} else if (maxNodeSelection == 1) {
 				selectedNodes = [e.detail];
 			} else {
-				notificationStore.actions.warning(
-					'Cannot select more than ' + maxNodeSelection + ' items'
-				);
+				notificationStore.actions.warning('Cannot select more than ' + maxNodeSelection + ' items');
 			}
 		} else {
 			selectedNodes =
@@ -182,20 +180,11 @@
 			/>
 		</div>
 	{/if}
-	<ul
-		class="spectrum-TreeView"
-		style="margin: unset;"
-		class:spectrum-TreeView--quiet={quiet}
-	>
+	<ul class="spectrum-TreeView" style="margin: unset;" class:spectrum-TreeView--quiet={quiet}>
 		{#key $fetch?.rows}
 			{#if $fetch?.loaded && $fetch?.rows?.length}
 				{#each tree?.children as node, idx (idx)}
-					<SuperTree
-						tree={node}
-						nodeSelection
-						{selectedNodes}
-						on:nodeSelect={handleNodeSelect}
-					/>
+					<SuperTree tree={node} nodeSelection {selectedNodes} on:nodeSelect={handleNodeSelect} />
 				{/each}
 			{:else if $fetch?.loading}
 				<li class="spectrum-TreeView-item" class:is-open={true}>

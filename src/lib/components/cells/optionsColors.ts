@@ -40,7 +40,8 @@ export function buildOptionColorMap(
 
 	options.forEach(
 		(option, index) =>
-			(obj[option] = optionColors[option] ?? OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length])
+			(obj[option] =
+				optionColors[option] ?? OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length])
 	);
 	return obj;
 }

@@ -9,12 +9,7 @@
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
 
-	let {
-		id,
-		value,
-		cellOptions = {},
-		autofocus = false
-	} = $props();
+	let { id, value, cellOptions = {}, autofocus = false } = $props();
 
 	let anchor = $state(null);
 	let picker = $state();
@@ -64,9 +59,7 @@
 				? 'cell'
 				: 'form'
 	);
-	let placeholder = $derived(
-		readonly || disabled ? '' : config.placeholder || 'Select date range'
-	);
+	let placeholder = $derived(readonly || disabled ? '' : config.placeholder || 'Select date range');
 
 	const formatDateRange = (from, to, dateFormat) => {
 		if (!dateFormat || dateFormat === 'default') {
@@ -415,7 +408,7 @@
 </BaseCell>
 
 <PickerPopover
-	anchor={anchor}
+	{anchor}
 	visible={inEdit}
 	align="right"
 	{open}

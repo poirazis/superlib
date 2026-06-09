@@ -333,7 +333,6 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
@@ -356,7 +355,7 @@
 </BaseCell>
 
 <PickerPopover
-	anchor={anchor}
+	{anchor}
 	visible={inEdit}
 	align="left"
 	{open}
@@ -412,10 +411,7 @@
 							role="button"
 							tabindex="0"
 						>
-							<div
-								class="color-fill {spectrumTheme || ''}"
-								style="background: {colorName};"
-							>
+							<div class="color-fill {spectrumTheme || ''}" style="background: {colorName};">
 								{#if value === colorName}
 									<i class="ri-check-line" style="color: {checkColor};"></i>
 								{/if}

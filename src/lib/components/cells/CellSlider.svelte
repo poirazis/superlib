@@ -452,5 +452,4 @@
 		white-space: nowrap;
 		user-select: none;
 	}
-
 </style>

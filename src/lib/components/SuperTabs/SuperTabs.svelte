@@ -135,10 +135,7 @@
 
 	.tabs.list {
 		gap: 0;
-		background-color: var(
-			--list-background,
-			var(--spectrum-global-color-gray-50)
-		);
+		background-color: var(--list-background, var(--spectrum-global-color-gray-50));
 		border: unset;
 		padding: unset;
 		padding-bottom: 0.5rem;
@@ -195,19 +192,14 @@
 	}
 
 	.tab.button:active:not(.disabled):not(.list-section) {
-		background-color: rgb(
-			from var(--spectrum-global-color-gray-200) r g b / 0.85
-		);
+		background-color: rgb(from var(--spectrum-global-color-gray-200) r g b / 0.85);
 	}
 
 	.tab.button.selected {
 		color: var(--spectrum-global-color-gray-700);
 		font-weight: 500;
-		border: 1px solid
-			rgb(from var(--spectrum-global-color-gray-400) r g b / 0.75);
-		background-color: rgb(
-			from var(--spectrum-global-color-gray-200) r g b / 0.85
-		);
+		border: 1px solid rgb(from var(--spectrum-global-color-gray-400) r g b / 0.75);
+		background-color: rgb(from var(--spectrum-global-color-gray-200) r g b / 0.85);
 	}
 
 	.tab.list {
@@ -256,9 +248,7 @@
 	}
 
 	.tab.button:hover:not(.selected) {
-		background-color: rgb(
-			from var(--spectrum-global-color-gray-200) r g b / 0.65
-		);
+		background-color: rgb(from var(--spectrum-global-color-gray-200) r g b / 0.65);
 		border-color: var(--spectrum-global-color-gray-200);
 	}
 

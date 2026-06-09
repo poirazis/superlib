@@ -1,12 +1,7 @@
 <script>
 	import SuperPopover from '../../SuperPopover/SuperPopover.svelte';
 
-	let {
-		anchor,
-		content,
-		show = false,
-		align = 'top'
-	} = $props();
+	let { anchor, content, show = false, align = 'top' } = $props();
 </script>
 
 <SuperPopover

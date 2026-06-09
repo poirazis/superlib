@@ -9,12 +9,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	let {
-		id,
-		value,
-		align = 'left',
-		cellOptions = {}
-	} = $props();
+	let { id, value, align = 'left', cellOptions = {} } = $props();
 
 	let anchor = $state(null);
 	let picker = $state(null);
@@ -228,7 +223,6 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
@@ -246,7 +240,7 @@
 </BaseCell>
 
 <PickerPopover
-	anchor={anchor}
+	{anchor}
 	visible={inEdit}
 	{align}
 	{open}

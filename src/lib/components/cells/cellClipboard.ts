@@ -1,7 +1,4 @@
-export function copyTextToClipboard(
-	text: string,
-	setJustCopied: (copied: boolean) => void
-): void {
+export function copyTextToClipboard(text: string, setJustCopied: (copied: boolean) => void): void {
 	navigator.clipboard
 		.writeText(text)
 		.then(() => {

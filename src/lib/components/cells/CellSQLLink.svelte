@@ -235,12 +235,7 @@
 				{#if (localValue?.length ?? 0) < 1}
 					<span> {placeholder} </span>
 				{:else if pills}
-					<div
-						class="items"
-						class:pills
-						class:withCount={localValue.length > 5}
-						class:inEdit
-					>
+					<div class="items" class:pills class:withCount={localValue.length > 5} class:inEdit>
 						{#each localValue as val, idx (idx)}
 							{#if idx < 5}
 								<div class="item">

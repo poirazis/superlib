@@ -20,7 +20,9 @@
 		focusout: void;
 	}>();
 
-	const sdk = getContext<{ API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> } }>('sdk');
+	const sdk = getContext<{
+		API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> };
+	}>('sdk');
 
 	let {
 		id,
@@ -58,7 +60,9 @@
 	let inEdit = $derived($cellState === 'editing');
 	let error = $derived(optionError);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(value, multi)));
+	let isDirty = $derived(
+		JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(value, multi))
+	);
 	let showPlaceholder = $derived(localvalue.length < 1);
 
 	const emitChange = (nextValue: AttachmentItem[]) => {
@@ -156,7 +160,10 @@
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!anchor?.contains(related) && !picker?.contains(related)) {
-					if (JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(originalValue, multi))) {
+					if (
+						JSON.stringify(localvalue) !==
+						JSON.stringify(normalizeAttachments(originalValue, multi))
+					) {
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
@@ -166,7 +173,10 @@
 			submit(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!picker?.contains(related)) {
-					if (JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(originalValue, multi))) {
+					if (
+						JSON.stringify(localvalue) !==
+						JSON.stringify(normalizeAttachments(originalValue, multi))
+					) {
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
@@ -225,7 +235,6 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
-
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>
@@ -233,10 +242,7 @@
 
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="attachment-display"
-		class:placeholder={showPlaceholder}
-	>
+	<div class="attachment-display" class:placeholder={showPlaceholder}>
 		{#if localvalue.length || inEdit}
 			<div class="items">
 				{#each localvalue.slice(0, 5) as file}
@@ -261,7 +267,7 @@
 </BaseCell>
 
 <PickerPopover
-	anchor={anchor}
+	{anchor}
 	visible={inEdit}
 	align="right"
 	{open}

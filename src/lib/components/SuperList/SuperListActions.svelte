@@ -1,13 +1,7 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
 
-	let {
-		inEdit,
-		reorderOnly,
-		fullSelection,
-		editorState,
-		hasItems
-	} = $props();
+	let { inEdit, reorderOnly, fullSelection, editorState, hasItems } = $props();
 
 	const dispatch = createEventDispatcher();
 </script>
@@ -25,9 +19,7 @@
 			{editorState == 'Closed' ? (fullSelection ? 'All Selected' : 'Select') : 'Close'}
 		</div>
 		{#if hasItems}
-			<div class="clear-button" on:click|preventDefault={() => dispatch('clear')}>
-				Clear
-			</div>
+			<div class="clear-button" on:click|preventDefault={() => dispatch('clear')}>Clear</div>
 		{/if}
 	</li>
 {/if}
