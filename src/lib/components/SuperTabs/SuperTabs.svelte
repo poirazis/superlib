@@ -56,6 +56,7 @@
 				</div>
 			{/if}
 			{#each containers as container, idx (idx)}
+				<!-- svelte-ignore event_directive_deprecated -->
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<button
@@ -67,7 +68,7 @@
 					class:selected={container.id === selectedTab}
 					class:disabled={container.disabled}
 					class:list-section={container.isTabSection}
-					onclick={() => {
+					on:click={() => {
 						if (!container.disabled && !container.isTabSection) dispatch('change', container);
 					}}
 				>
