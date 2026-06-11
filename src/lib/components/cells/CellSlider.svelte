@@ -10,7 +10,7 @@
 		value,
 		cellOptions = {
 			role: 'form',
-			initialState: 'editing',
+			initialState: 'view',
 			debounce: false,
 			min: 0,
 			max: 100,
@@ -50,7 +50,9 @@
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(value !== localValue);
-	let interactive = $derived(!$cellState || $cellState === 'editing');
+	let interactive = $derived(
+		!disabled && !readonly && ($csm === 'view' || $csm === 'editing')
+	);
 
 	let justCopied = $state(false);
 
@@ -122,7 +124,10 @@
 	};
 
 	const handleTrackPointerDown = (event) => {
-		if (!interactive || disabled || readonly) return;
+		if (!interactive) return;
+		if ($csm === 'view') {
+			csm.focus();
+		}
 		dragging = true;
 		event.currentTarget.setPointerCapture(event.pointerId);
 		setLocalValue(valueFromClientX(event.clientX));
@@ -163,7 +168,7 @@
 		setLocalValue((localValue ?? lowerBound) + delta);
 	};
 
-	export const cellState = fsm('editing', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -241,8 +246,11 @@
 	});
 
 	export const cellApi = {
-		focus: () => trackElement?.focus(),
-		reset: () => cellState.reset(),
+		focus: () => {
+			csm.focus();
+			trackElement?.focus();
+		},
+		reset: () => csm.reset(value),
 		isDirty: () => isDirty,
 		getValue: () => localValue,
 		setError: (err) => {
@@ -272,13 +280,13 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value != null) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -288,7 +296,7 @@
 <BaseCell
 	{id}
 	role={config.role === 'inline' ? 'inline' : 'form'}
-	state={cellState}
+	{csm}
 	grabber
 	{icon}
 	isDirty={isDirty && showDirty}
@@ -323,7 +331,7 @@
 				on:pointerup={handleTrackPointerUp}
 				on:pointercancel={handleTrackPointerUp}
 				on:keydown={handleKeydown}
-				on:blur={cellState.focusout}
+				on:blur={csm.focusout}
 			>
 				<div class="slider-fill-bg" style:width="{fillPercent}%"></div>
 				<div class="slider-ticks" aria-hidden="true">
