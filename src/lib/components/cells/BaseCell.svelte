@@ -2,7 +2,7 @@
 	import { getContext } from 'svelte';
 	interface BaseCellProps {
 		role?: string;
-		state?: any; // state machine instance
+		csm?: any; // state machine instance
 		id?: string;
 		error?: boolean;
 		isDirty?: boolean;
@@ -25,7 +25,8 @@
 	let {
 		id,
 		role = 'form',
-		state,
+		csm,
+		icon,
 		clearable = false,
 		error = false,
 		isDirty = false,
@@ -34,17 +35,15 @@
 		justCopied = false,
 		copyIcon = 'always',
 		grabber = false,
-		popupOpen = false,
+		popupOpen = undefined,
 		color,
 		background,
 		tabindex: tabindexOverride,
-		root = $bindable(null),
+		anchor = $bindable(null),
 		children
 	}: BaseCellProps = $props();
 
-	let cellTabindex = $derived(
-		tabindexOverride ?? ($state == 'view' || $state == 'copyable' ? 0 : -1)
-	);
+	let cellTabindex = $derived(tabindexOverride ?? ($csm == 'view' || $csm == 'copyable' ? 0 : -1));
 
 	let actionIcon = $derived(justCopied ? 'ph ph-check' : 'ph ph-copy');
 	let copyIconOnHover = $derived(copyIcon === 'onhover');
@@ -57,44 +56,55 @@
 <!-- svelte-ignore event_directive_deprecated -->
 
 <div
-	bind:this={root}
+	bind:this={anchor}
 	{id}
 	tabindex={cellTabindex}
-	class="super-cell {$state} {role}"
+	class="super-cell {$csm} {role}"
+	class:error
+	class:dropdown={popupOpen !== undefined}
 	class:multirow={multirow || role == 'inline'}
 	class:grabber
 	class:justCopied
-	class:icon-on-hover={$state === 'copyable' && copyIconOnHover}
+	class:icon-on-hover={$csm === 'copyable' && copyIconOnHover}
 	class:open-popup={popupOpen}
 	class:isDirty
-	class:error
-	title={$state === 'copyable' ? 'Click to copy' : undefined}
+	title={$csm === 'copyable' ? 'Click to copy' : undefined}
 	style:color
 	style:background
-	on:focusin={state.focus}
-	on:focusout={state.focusout}
-	on:click={state.click}
-	on:keydown={state.keydown}
+	on:focusin={csm.focus}
+	on:focusout={csm.focusout}
+	on:click={csm.click}
+	on:keydown={csm.keydown}
+	on:mousedown={csm.mousedown}
 >
+	{#if error || icon}
+		<!-- svelte-ignore a11y_interactive_supports_focus -->
+		<i
+			class={error ? 'ph ph-warning error-icon' : 'ph ph-' + icon + ' field-icon'}
+			title={error ? 'Error' : icon}
+		></i>
+	{/if}
+
 	{@render children?.()}
 
 	{#if clearable}
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
 		<i
 			class="ph ph-x control-icon clear-icon"
-			on:mousedown|preventDefault={state.clear}
+			on:mousedown|preventDefault={csm.clear}
 			role="button"
 			title="Clear value"
 		></i>
 	{/if}
 
-	{#if $state === 'copyable'}
+	{#if $csm === 'copyable'}
 		<i class={actionIcon + ' copy-icon'} aria-hidden="true"></i>
 	{/if}
 </div>
 
 <style>
 	.super-cell {
+		--super-cell-padding: 0rem 0.75rem;
 		display: flex;
 		align-items: stretch;
 		width: 100%;
@@ -113,6 +123,7 @@
 
 	.super-cell:focus {
 		outline: none;
+		border-color: var(--spectrum-global-color-static-blue-400);
 	}
 
 	.super-cell.view {
@@ -124,6 +135,15 @@
 		border-color: rgb(from var(--spectrum-global-color-static-blue-400) r g b / 0.5);
 		background: var(--spectrum-global-color-gray-50);
 		cursor: text;
+	}
+	.super-cell.view.dropdown:hover {
+		border-color: var(--spectrum-global-color-gray-300);
+		background: var(--spectrum-global-color-gray-100);
+		cursor: pointer;
+	}
+
+	.super-cell.view.error {
+		border-color: var(--spectrum-global-color-red-500);
 	}
 
 	.super-cell.form {
@@ -206,8 +226,9 @@
 		background: var(--spectrum-global-color-gray-50);
 	}
 
-	.super-cell.open-popup.editing {
-		border-color: var(--spectrum-global-color-static-blue-500);
+	.super-cell.dropdown.editing {
+		border-color: var(--spectrum-global-color-gray-300);
+		background: var(--spectrum-global-color-gray-100);
 	}
 
 	.super-cell.error.editing {
@@ -233,7 +254,7 @@
 	}
 
 	:global(.super-cell > .copy-icon) {
-		opacity: 0.45;
+		opacity: 0.5;
 		font-size: 15px;
 		transition:
 			color 0.15s ease,
@@ -248,7 +269,7 @@
 		border-left: 1px solid var(--spectrum-global-color-gray-300);
 	}
 	:global(.super-cell > .control-icon) {
-		opacity: 0.75;
+		opacity: 0.5;
 		font-size: 15px;
 		transition:
 			color 0.15s ease,
@@ -257,10 +278,22 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding-right: 0.5rem;
+		padding-right: 0.75rem;
 		padding-left: 0.5rem;
 		color: var(--spectrum-global-color-gray-700);
-		border-left: 1px solid var(--spectrum-global-color-gray-300);
+	}
+
+	:global(.super-cell:hover > .control-icon) {
+		opacity: 1;
+		cursor: pointer;
+	}
+
+	.error-icon {
+		color: var(--spectrum-global-color-red-500);
+		font-size: 14px;
+		align-self: center;
+		padding: var(--super-cell-padding, 0.75rem);
+		padding-right: unset;
 	}
 
 	.clear-icon {
@@ -291,7 +324,7 @@
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
+		padding: var(--super-cell-padding);
 	}
 	:global(.super-cell.inline > input.editor) {
 		padding: 0.25rem 0.25rem !important;

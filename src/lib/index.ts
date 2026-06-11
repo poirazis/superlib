@@ -6,3 +6,4 @@ export { default as Switch } from './components/UI/elements/Switch.svelte';
 export { default as Checkbox } from './components/UI/elements/Checkbox.svelte';
 export { default as SuperLightbox } from './components/SuperLightbox/SuperLightbox.svelte';
 export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
+export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';

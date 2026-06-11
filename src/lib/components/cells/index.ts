@@ -20,3 +20,4 @@ export { default as CellColor } from './CellColor.svelte';
 export { default as CellIcon } from './CellIcon.svelte';
 export { default as CellJSON } from './CellJSON.svelte';
 export { default as CellStringMask } from './CellStringMask.svelte';
+export { default as BaseDropdownCell } from './BaseDropdownCell.svelte';

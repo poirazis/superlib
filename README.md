@@ -1,65 +1,148 @@
-# Svelte library
+# @poirazis/superlib
 
-Everything you need to build a Svelte library, powered by [`sv`](https://npmjs.com/package/sv).
+A Svelte 5 component library for building rich data-entry UIs, field plugins, and admin interfaces. It includes table/form cell editors, layout primitives, and reusable UI building blocks.
 
-Read more about creating a library [in the docs](https://svelte.dev/docs/kit/packaging).
+## Requirements
 
-## Creating a project
+- Svelte 5
+- Bun, npm, pnpm, or yarn
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+## Installation
 
 ```sh
-# recreate this project
-bun x sv@0.15.4 create --template library --types ts --add prettier --install bun superlib
+npm install @poirazis/superlib
 ```
 
-## Developing
+## Usage
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Import components from the package entry point:
+
+```svelte
+<script>
+	import { Button, SuperTabs, CellString, SuperField } from '@poirazis/superlib';
+</script>
+
+<SuperField label="Name" field="name">
+	<CellString value="Jane" cellOptions={{ role: 'formInput' }} />
+</SuperField>
+
+<Button text="Save" type="primary" />
+```
+
+## Exports
+
+### UI
+
+| Component | Description |
+| --- | --- |
+| `Button` | Action button with icons, confirm mode, timer/loop actions |
+| `Switch` | Toggle switch |
+| `Checkbox` | Checkbox input |
+
+### Layout & structure
+
+| Component | Description |
+| --- | --- |
+| `SuperField` | Labelled form field wrapper with help text and error display |
+| `SuperList` | Draggable, selectable list with row actions |
+| `SuperTabs` | Tabbed container |
+| `SuperLightbox` | Full-screen attachment/image viewer |
+
+### Cell editors
+
+Cell components are designed for inline editing in tables and forms. They use a shared `cellOptions` prop for role, readonly/disabled state, styling, and behaviour.
+
+| Component | Description |
+| --- | --- |
+| `TextCell` | Simple text display cell |
+| `CellString` | String input with formatting and debounce |
+| `CellStringMask` | Masked string input (IMask) |
+| `CellNumber` | Number input with formatting |
+| `CellSlider` | Numeric slider |
+| `CellBoolean` | Boolean toggle |
+| `CellDatetime` | Date/time picker |
+| `CellDateRange` | Date range picker |
+| `CellOptions` | Single/multi select options |
+| `CellOptionsAdvanced` | Advanced options picker |
+| `CellTags` | Tag input |
+| `CellLink` | Link field |
+| `CellLinkPickerSelect` | Link picker (select) |
+| `CellLinkPickerTree` | Link picker (tree) |
+| `CellSQLLink` | SQL-backed link field |
+| `CellSQLLinkPicker` | SQL link picker |
+| `CellAttachment` | Attachment upload (compact) |
+| `CellAttachmentExpanded` | Attachment upload (expanded/gallery) |
+| `CellAttachmentSlider` | Attachment carousel |
+| `CellColor` | Color picker |
+| `CellIcon` | Icon picker |
+| `CellJSON` | JSON editor |
+
+### Cell context
+
+Many cell components expect a Svelte context key named `sdk` (for example `processStringSync`, `API.uploadAttachment`). Provide it from a parent wrapper when using cells outside their original host environment:
+
+```svelte
+<script>
+	import { setContext } from 'svelte';
+	import { CellString } from '@poirazis/superlib';
+
+	setContext('sdk', {
+		processStringSync: (template, ctx) => String(ctx.value ?? ''),
+		API: {
+			uploadAttachment: async () => []
+		}
+	});
+</script>
+```
+
+## Development
+
+Clone the repo and install dependencies:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+bun install
 ```
 
-Everything inside `src/lib` is part of your library, everything inside `src/routes` can be used as a showcase or preview app.
+| Script | Description |
+| --- | --- |
+| `bun run dev` | Start the local showcase app |
+| `bun run build` | Build the showcase app and library package |
+| `bun run watch` | Rebuild the library on file changes |
+| `bun run lint` | Run Prettier checks |
+| `bun run format` | Format the codebase |
+| `bun run check` | Full svelte-check (includes untyped components) |
+| `bun run check:ts` | Type-check only components that use TypeScript |
 
-## Building
-
-To build your library:
-
-```sh
-npm pack
-```
-
-To create a production version of your showcase app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Source lives in `src/lib`. The showcase app in `src/routes` is for local preview only and is not published.
 
 ## Publishing
 
-Go into the `package.json` and give your package the desired name through the `"name"` option. Also consider adding a `"license"` field and point it to a `LICENSE` file which you can create from a template (one popular option is the [MIT license](https://opensource.org/license/mit/)).
+Releases are automated via GitHub Actions on push to `main`. To publish a new version to npm:
 
-To publish your library to [npm](https://www.npmjs.com):
+1. Bump the version in `package.json`
+2. Commit and push to `main`
+
+The release workflow runs lint, scoped type-check (`check:ts`), builds the package, and publishes when the version in the tip commit differs from its parent. You can also trigger a manual release from the Actions tab.
 
 ```sh
-npm publish
+# example
+npm version patch
+git push origin main
+```
+
+## Project structure
+
+```
+src/lib/
+├── components/
+│   ├── cells/          # Table/form cell editors
+│   ├── form/           # Form layout components
+│   ├── SuperList/      # Draggable list
+│   ├── SuperTabs/      # Tabs
+│   ├── SuperTree/      # Tree view
+│   ├── SuperLightbox/  # Lightbox viewer
+│   ├── SuperPopover/   # Popover positioning
+│   └── UI/elements/    # Basic UI controls
+├── actions/            # Svelte actions (click outside, dropdown positioning)
+└── index.ts            # Public exports
 ```

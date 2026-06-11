@@ -21,9 +21,9 @@
 	} = $props();
 
 	let timer = $state();
-	let localValue = $state(null);
+	let localValue = $derived(value);
 	let editText = $state('');
-	let lastEdit = $state();
+
 	let errors = $state([]);
 	let editor = $state();
 	let justCopied = $state(false);
@@ -54,8 +54,8 @@
 
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(!!lastEdit && value !== localValue);
-	let inEdit = $derived($cellState === 'editing');
+	let isDirty = $derived(value !== localValue);
+	let inEdit = $derived($csm === 'editing');
 	let displayValue = $derived(inEdit ? localValue : (value ?? null));
 
 	let formattedValue = $derived.by(() => {
@@ -126,18 +126,14 @@
 		editText = localValue != null ? String(localValue) : '';
 	}
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
 			}
 		},
 		view: {
-			_enter() {
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
-				lastEdit = undefined;
-			},
+			_enter() {},
 			focus() {
 				if (!readonly && !disabled && !calculated) {
 					return 'editing';
@@ -148,7 +144,6 @@
 				if (newValue == localValue) return;
 				const num = Number(value);
 				localValue = isNaN(num) ? null : num;
-				lastEdit = undefined;
 				errors = [];
 				return initialState;
 			}
@@ -197,14 +192,12 @@
 				}, 50);
 			},
 			_exit() {
-				lastEdit = undefined;
 				dispatch('exitedit');
 			},
 			focus() {},
 			clear() {
 				editText = '';
 				localValue = null;
-				lastEdit = new Date();
 				dispatch('change', null);
 				dispatch('clear', null);
 			},
@@ -224,7 +217,6 @@
 				const num = Number(value);
 				localValue = isNaN(num) ? null : num;
 				syncEditTextFromValue();
-				lastEdit = undefined;
 				dispatch('cancel');
 				return initialState;
 			},
@@ -302,8 +294,6 @@
 					localValue = parseEditableValue(newValue);
 				}
 
-				lastEdit = new Date();
-
 				if (isCompleteEditText(newValue)) {
 					this.debouncedDispatch();
 				}
@@ -313,7 +303,6 @@
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base + stepValue * multiplier).toFixed(decimals ?? 0)));
 				syncEditTextFromValue();
-				lastEdit = new Date();
 				this.debouncedDispatch();
 			},
 			decrement(e) {
@@ -321,7 +310,6 @@
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base - stepValue * multiplier).toFixed(decimals ?? 0)));
 				syncEditTextFromValue();
-				lastEdit = new Date();
 				this.debouncedDispatch();
 			},
 			handleWheel(e) {
@@ -339,9 +327,9 @@
 	});
 
 	export const cellApi = {
-		focus: () => cellState.focus(),
-		reset: () => cellState.reset(value),
-		isEditing: () => $cellState === 'editing',
+		focus: () => csm.focus(),
+		reset: () => csm.reset(value),
+		isEditing: () => $csm === 'editing',
 		isDirty: () => isDirty,
 		getValue: () => localValue,
 		setError: (err) => {
@@ -354,12 +342,6 @@
 			value = val;
 		}
 	};
-
-	$effect(() => {
-		if ($cellState !== 'editing') {
-			cellState.reset(value);
-		}
-	});
 
 	$effect(() => {
 		if (autofocus) {
@@ -375,16 +357,24 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value != null && value !== '') {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 
 		tabindex = readonly || disabled ? -1 : 0;
+	});
+
+	$effect(() => {
+		console.log('Value', value);
+	});
+
+	$effect(() => {
+		console.log('Local Value', localValue);
 	});
 </script>
 
@@ -393,7 +383,7 @@
 <BaseCell
 	{id}
 	role={config.role}
-	state={cellState}
+	{csm}
 	{icon}
 	isDirty={isDirty && showDirty}
 	{clearable}
@@ -410,24 +400,23 @@
 	<input
 		bind:this={editor}
 		class="editor"
-		class:placeholder={inEdit ? editText === '' : !formattedValue}
+		class:placeholder={!localValue}
 		style:text-align={align}
 		{tabindex}
-		disabled={$cellState != 'editing'}
+		disabled={$csm != 'editing'}
 		value={inEdit ? editText : formattedValue}
 		{placeholder}
-		on:keydown={cellState.keydown}
-		on:input={cellState.handleInput}
-		on:focusout={cellState.focusout}
+		on:keydown={csm.keydown}
+		on:input={csm.handleInput}
 		on:wheel={(e) => {
-			if (inEdit) cellState.handleWheel(e);
+			if (inEdit) csm.handleWheel(e);
 		}}
 	/>
 
 	{#if showStepper && inEdit}
 		<CellNumberStepper
-			onIncrement={(e) => cellState.increment(e)}
-			onDecrement={(e) => cellState.decrement(e)}
+			onIncrement={(e) => csm.increment(e)}
+			onDecrement={(e) => csm.decrement(e)}
 		/>
 	{/if}
 </BaseCell>

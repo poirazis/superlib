@@ -34,11 +34,11 @@
 	});
 
 	let controlType = $derived(config.controlType);
-	let clearable = $derived(config.role != 'tableCell' && $cellState === 'editing' && localValue);
+	let clearable = $derived(config.role != 'tableCell' && $csm === 'editing' && localValue);
 
 	let readonly = $derived(config.readonly);
 	let optionError = $derived(config.error);
-	let optionIcon = $derived(config.icon);
+	let icon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
@@ -47,9 +47,9 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let disabled = $derived(config.disabled);
 
-	// Derived values that do not depend on $cellState
+	// Derived values that do not depend on $csm
 	let error = $derived(optionError || errors.length > 0);
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
+
 	let isDirty = $derived(value !== localValue);
 	let textarea = $derived(controlType === 'textarea');
 
@@ -57,7 +57,7 @@
 	let tabindex = $state(0);
 
 	// FSM created here — methods close over the derived/state values declared above
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -167,8 +167,8 @@
 
 	// Public API
 	export const cellApi = {
-		focus: () => cellState.focus(),
-		reset: () => cellState.reset(),
+		focus: () => csm.focus(),
+		reset: () => csm.reset(),
 		isDirty: () => isDirty,
 		getValue: () => localValue,
 		setError: (err) => {
@@ -186,7 +186,7 @@
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
+				csm.focus();
 			}, 50);
 		}
 
@@ -200,13 +200,13 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 
 		tabindex = readonly || disabled ? -1 : 0;
@@ -218,7 +218,7 @@
 <BaseCell
 	{id}
 	role={config.role}
-	state={cellState}
+	{csm}
 	{icon}
 	multirow={controlType == 'textarea'}
 	isDirty={isDirty && showDirty}
@@ -229,22 +229,17 @@
 	{color}
 	{background}
 >
-	{#if icon && !textarea}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
-	{/if}
-
 	{#key textarea}
 		{#if textarea}
 			<textarea
 				bind:this={editor}
 				class="editor"
 				class:placeholder={!localValue}
-				disabled={$cellState != 'editing'}
+				disabled={$csm != 'editing'}
 				placeholder={cellOptions?.placeholder}
 				value={localValue}
-				on:input={cellState.debounce}
-				on:focusout={cellState.focusout}
-				on:keydown={cellState.keydown}
+				on:input={csm.debounce}
+				on:keydown={csm.keydown}
 			></textarea>
 		{:else}
 			<input
@@ -252,13 +247,13 @@
 				class="editor"
 				{tabindex}
 				class:placeholder={!localValue}
-				disabled={$cellState != 'editing'}
-				value={$cellState === 'editing' ? localValue : formattedValue}
+				disabled={$csm != 'editing'}
+				value={$csm === 'editing' ? localValue : formattedValue}
 				placeholder={cellOptions?.placeholder}
 				style:text-align={cellOptions.align}
-				on:input={cellState.debounce}
-				on:focusout={cellState.focusout}
-				on:keydown={cellState.keydown}
+				on:input={csm.debounce}
+				on:focusout={csm.focusout}
+				on:keydown={csm.keydown}
 			/>
 		{/if}
 	{/key}

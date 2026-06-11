@@ -1,13 +1,20 @@
-<script>
-	import { createEventDispatcher, tick } from 'svelte';
+<script lang="ts">
+	interface Option {
+		value: string;
+		label: string;
+		icon?: string;
+		color?: string;
+	}
+
+	import { createEventDispatcher, tick, getContext } from 'svelte';
 	import CellPickerFrame from './CellPickerFrame.svelte';
 	import CellPickerOptionsList from './CellPickerOptionsList.svelte';
 	import CellPickerOption from './CellPickerOption.svelte';
 	import PickerPopover from './PickerPopover.svelte';
-	import { OPTIONS_COLORS_ARRAY } from './optionsColors';
-	import { useOptionsSource } from './useOptionsSource.svelte';
 	import './CellCommon.css';
 	import fsm from 'svelte-fsm';
+
+	const { API, QueryUtils, fetchData } = getContext('sdk');
 
 	const dispatch = createEventDispatcher();
 
@@ -46,14 +53,13 @@
 	let padding = $derived(config.padding);
 	let showDirty = $derived(config.showDirty);
 	let iconColumn = $derived(config.iconColumn);
+	let error = $derived(config.error);
 
-	const source = useOptionsSource({
-		getCellOptions: () => cellOptions ?? {},
-		getFieldSchema: () => fieldSchema
-	});
+	let options = $derived(fieldSchema?.constraints || config.options || []);
+	let filteredOptions = $derived(options);
 
-	const { options, labels, dataSourceStore, colors } = source;
-	let optionsSource = $derived(source.optionsSource);
+	let optionsSource = $derived(config.optionsSource);
+	let source;
 
 	const editorState = fsm('Closed', {
 		'*': {
@@ -75,7 +81,7 @@
 
 					localValue = [...localValue];
 
-					inputValue = $labels[localValue[0]] || localValue[0] || '';
+					inputValue = val.label;
 				}
 
 				if (cellOptions.debounce) {
@@ -84,9 +90,7 @@
 						dispatch('change', multi ? localValue : localValue[0]);
 						dispatch(
 							'labelChange',
-							multi
-								? localValue.map((val) => $labels[val] || val)
-								: $labels[localValue[0]] || localValue[0]
+							multi ? localValue.map((val) => val.label) : localValue[0]?.label
 						);
 					}, cellOptions.debounce ?? 0);
 				}
@@ -102,9 +106,7 @@
 					else editor?.focus();
 				}
 			},
-			filterOptions(term) {
-				source.filterOptions(term);
-			},
+			filterOptions(term) {},
 			clearFilter() {
 				searchTerm = null;
 				this.filterOptions();
@@ -258,16 +260,18 @@
 			},
 			loadOptions(src) {
 				source.loadOptions(src);
+			},
+			loadSchemaOptions() {
+				console.log('Loading schema options', options, fieldSchema?.constrains);
+
+				if (optionsSource == 'schema') {
+					options = fieldSchema?.constrains?.iclusion || [];
+				}
 			}
 		},
 		Loading: {
-			_enter() {
-				source.fetch = source.createFetch($dataSourceStore);
-				source.loading = true;
-			},
-			_exit() {
-				source.loading = false;
-			},
+			_enter() {},
+			_exit() {},
 			refresh() {},
 			reload() {},
 			syncFetch(fetchState) {
@@ -283,8 +287,9 @@
 		},
 		View: {
 			_enter() {
-				searchTerm = null;
-				editorState.filterOptions();
+				this.loadSchemaOptions();
+				if (config.optionsSource) searchTerm = null;
+				// editorState.filterOptions();
 			},
 			toggle(e) {
 				if (cellOptions.disabled || cellOptions.readonly) return;
@@ -304,7 +309,6 @@
 					editor?.focus();
 				}, 30);
 				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
-				inputValue = multi ? '' : $labels[localValue[0]] || localValue[0] || '';
 
 				dispatch('enteredit');
 			},
@@ -329,12 +333,6 @@
 				if (cellOptions.debounce && isDirty) {
 					clearTimeout(timer);
 					dispatch('change', multi ? localValue : localValue[0]);
-					dispatch(
-						'labelChange',
-						multi
-							? localValue.map((val) => $labels[val] || val)
-							: $labels[localValue[0]] || localValue[0]
-					);
 				} else {
 					this.submit();
 				}
@@ -355,10 +353,10 @@
 					if (multi) {
 						dispatch(
 							'labelChange',
-							localValue.map((val) => $labels[val] || val)
+							localValue.map((val) => val.label)
 						);
 					} else {
-						dispatch('labelChange', $labels[localValue[0]] || localValue[0]);
+						dispatch('labelChange', localValue[0]?.label);
 					}
 				}
 			},
@@ -386,8 +384,7 @@
 	let isObjects = $derived(localValue.length && typeof localValue[0] == 'object' ? true : false);
 	let isEmpty = $derived(localValue.length < 1);
 	let nooptions = $derived(!$options || $options.length < 1);
-	let loading = $derived(source.loading);
-	let fetch = $derived(source.fetch);
+
 	let inEdit = $derived($cellState == 'Editing');
 	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
 	let pills = $derived(optionsViewMode == 'pills');
@@ -397,33 +394,11 @@
 	let icon = $derived(searchTerm && isEmpty ? 'ph ph-magnifying-glass' : cellOptions.icon);
 	let open = $derived($editorState == 'Open');
 
-	/* 	$effect(() => {
-		dataSourceStore.set(cellOptions?.datasource);
-	});
-
-	$effect(() => {
-		fetch?.update?.({ query: defaultQuery });
-	});
-
-	$effect(() => {
-		cellState.syncFetch($fetch);
-	});
-
-	$effect(() => {
-		cellState.loadDataOptions($fetch?.rows);
-	});
-
-	$effect(() => {
-		cellState.refresh($dataSourceStore, optionsSource);
-	}); */
-
-	/* 	$effect(() => {
-		cellState.reload(fieldSchema, labelColumn, valueColumn, iconColumn, colorColumn, customOptions);
-	});
+	let defaultQuery = $derived(QueryUtils.buildQuery(filters));
 
 	$effect(() => {
 		localValue = Array.isArray(value) ? value : value ? [value] : [];
-	}); */
+	});
 
 	$effect(() => {
 		if (autofocus) {
@@ -438,6 +413,10 @@
 				clearTimeout(timer);
 			}
 		};
+	});
+
+	$effect(() => {
+		console.log('CELL Schemsa', fieldSchema);
 	});
 </script>
 
@@ -478,11 +457,11 @@
 					>
 						<div class="items" class:pills style:justify-content={align ?? 'flex-start'}>
 							{#each localValue as val (val)}
-								<div class="item" style:--option-color={$colors[val]} style:min-width={'4rem'}>
+								<div class="item" style:--option-color={val.color} style:min-width={'4rem'}>
 									{#if pills}
 										<div class="loope"></div>
 									{/if}
-									<span> {$labels[val] || val} </span>
+									<span> {val.label} </span>
 								</div>
 							{/each}
 						</div>
@@ -515,13 +494,7 @@
 						{#if open}
 							{searchTerm ? searchTerm : 'Type to search...'}
 						{:else}
-							{loading
-								? 'Loading...'
-								: nooptions
-									? 'No options'
-									: placeholder
-										? placeholder
-										: 'Select...'}
+							{placeholder ? placeholder : 'No value'}
 						{/if}
 					{:else}
 						<div
@@ -532,18 +505,14 @@
 						>
 							{#if plaintext}
 								{#each localValue as val, idx (val)}
-									{$labels[val] || val}
+									{val}
 									{idx < localValue.length - 1 ? ', ' : ''}
 								{/each}
 							{:else}
 								{#each localValue as val, idx (val)}
-									<div
-										class="item"
-										style:--option-color={$colors[val] ||
-											OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
-									>
+									<div class="item" style:--option-color={val.color}>
 										<div class="loope"></div>
-										<span> {isObjects ? 'JSON' : $labels[val] || val} </span>
+										<span> {isObjects ? 'JSON' : val.label} </span>
 									</div>
 								{/each}
 							{/if}
@@ -580,13 +549,13 @@
 				</div>
 			{/if}
 
-			{#if source.filteredOptions?.length}
-				{#each source.filteredOptions as option, idx (idx)}
+			{#if filteredOptions?.length}
+				{#each filteredOptions as option, idx (idx)}
 					<CellPickerOption
 						textMode={optionsViewMode == 'text'}
 						focused={focusedOptionIdx === idx}
 						selected={localValue?.includes(option)}
-						optionColor={$colors[option]}
+						optionColor={option.color}
 						onSelect={() => editorState.toggleOption(idx)}
 						onFocus={() => (focusedOptionIdx = idx)}
 					>
@@ -595,9 +564,9 @@
 								class={iconColumn
 									? 'ph ph-' + fetch?.rows?.[idx]?.[iconColumn]
 									: 'ph-fill ph-square'}
-								style:color={$colors[option]}
+								style:color={option.color}
 							></i>
-							{$labels[option] || option}
+							{option.label}
 						</span>
 						<i class="ph ph-check"></i>
 					</CellPickerOption>
