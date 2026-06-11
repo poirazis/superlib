@@ -119,6 +119,7 @@
 			background-color 0.15s ease,
 			border-color 0.15s ease;
 		transition: border-color 0.15s ease;
+		color: var(--spectrum-global-color-gray-800);
 	}
 
 	.super-cell:focus {
@@ -128,7 +129,6 @@
 
 	.super-cell.view {
 		background: var(--spectrum-global-color-gray-50);
-		color: var(--spectrum-global-color-gray-800);
 	}
 
 	.super-cell.view:hover {

@@ -29,34 +29,25 @@
 	let timer = $state();
 	let localValue = $state(null);
 	let originalValue = $state();
-	let lastEdit = $state();
-	let isComplete = $state(false);
 	let inputMask = $state();
-	let inputElement = $state();
+	let editor = $state();
 	let errors = $state([]);
+	let isComplete = $state(false);
+	let justCopied = $state(false);
+	let tabindex = $state(0);
 
 	let config = $derived(cellOptions ?? {});
 	let initialState = $derived(config.initialState || 'view');
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let optionError = $derived(config.error);
-	let optionIcon = $derived(config.icon);
+	let icon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-
-	let justCopied = $state(false);
-
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
 
 	function createMaskInstance(maskPattern) {
 		if (!maskPattern) return null;
@@ -113,34 +104,38 @@
 		isComplete = tempMask.isComplete;
 	}
 
+	function syncEditorValue() {
+		if (inputMask) {
+			inputMask.unmaskedValue = localValue || '';
+			return;
+		}
+		if (editor) {
+			editor.value = localValue || '';
+		}
+	}
+
 	let placeholder = $derived(config.placeholder || mask || '');
+	let formattedValue = $derived(applyMask(value));
 	let error = $derived(optionError || errors.length > 0 || !!(localValue && mask && !isComplete));
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(originalValue !== localValue);
-	let inEdit = $derived($cellState === 'editing');
-	let displayValue = $derived(inEdit ? localValue : applyMask(value));
 	let clearable = $derived(
 		config.clearIcon !== false &&
 			config.role != 'tableCell' &&
-			inEdit &&
+			$csm === 'editing' &&
 			localValue != null &&
 			localValue !== ''
 	);
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
 			},
-			reset() {
+			reset(newValue) {
+				if (newValue == localValue) return;
 				localValue = value;
 				updateIsComplete();
-				if (inputMask) {
-					inputMask.unmaskedValue = localValue || '';
-				}
-				if (!mask && inputElement) {
-					inputElement.value = localValue || '';
-				}
+				syncEditorValue();
 				errors = [];
 				return initialState;
 			}
@@ -166,7 +161,7 @@
 				localValue = value;
 			},
 			click() {
-				copyTextToClipboard(displayValue || String(value ?? ''), (copied) => (justCopied = copied));
+				copyTextToClipboard(formattedValue || String(value ?? ''), (copied) => (justCopied = copied));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -187,31 +182,23 @@
 				updateIsComplete();
 				dispatch('enteredit');
 				setTimeout(() => {
-					inputElement?.focus();
+					editor?.focus();
 				}, 50);
-				if (inputMask) {
-					inputMask.unmaskedValue = localValue || '';
-				}
-				if (!mask && inputElement) {
-					inputElement.value = localValue || '';
-				}
+				syncEditorValue();
 			},
 			_exit() {
 				originalValue = undefined;
 				dispatch('exitedit');
-				dispatch('focusout');
 			},
+			focus() {},
 			clear() {
 				localValue = null;
 				updateIsComplete();
-				if (inputElement) {
-					inputElement.value = '';
-				}
-				if (inputMask) {
-					inputMask.unmaskedValue = '';
-				}
+				syncEditorValue();
+				dispatch('clear', null);
 			},
 			focusout() {
+				dispatch('focusout');
 				this.submit();
 			},
 			submit() {
@@ -219,6 +206,7 @@
 					if (mask && localValue && !isComplete) {
 						localValue = originalValue;
 						updateIsComplete();
+						syncEditorValue();
 						return initialState;
 					}
 					dispatch('change', localValue);
@@ -229,12 +217,7 @@
 				localValue = originalValue;
 				updateIsComplete();
 				dispatch('cancel');
-				if (inputMask) {
-					inputMask.unmaskedValue = localValue || '';
-				}
-				if (!mask && inputElement) {
-					inputElement.value = localValue || '';
-				}
+				syncEditorValue();
 				return initialState;
 			},
 			keydown(e) {
@@ -257,8 +240,14 @@
 					return;
 				}
 
-				if (e.key === 'Enter') this.submit();
-				if (e.key === 'Escape') this.cancel();
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					this.submit();
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					this.cancel();
+				}
 
 				if (e.key.length === 1 && mask) {
 					const tempMask = createMaskInstance(mask);
@@ -275,8 +264,8 @@
 	});
 
 	export const cellApi = {
-		focus: () => cellState.focus(),
-		reset: () => cellState.reset(),
+		focus: () => csm.focus(),
+		reset: () => csm.reset(value),
 		isDirty: () => isDirty,
 		getValue: () => localValue,
 		setError: (err) => {
@@ -291,76 +280,88 @@
 	};
 
 	function initIMask(node, maskPattern) {
-		if (!maskPattern) {
-			const handleInput = () => {
-				localValue = node.value;
-				lastEdit = new Date();
-			};
+		let plainInputHandler;
 
-			node.addEventListener('input', handleInput);
-			node.value = localValue || '';
-
-			return {
-				destroy() {
-					node.removeEventListener('input', handleInput);
-				}
-			};
+		function teardown() {
+			if (inputMask) {
+				inputMask.destroy();
+				inputMask = undefined;
+			}
+			if (plainInputHandler) {
+				node.removeEventListener('input', plainInputHandler);
+				plainInputHandler = undefined;
+			}
 		}
 
-		try {
-			const maskInstance = createMaskInstance(maskPattern);
-			if (!maskInstance) {
-				throw new Error('Failed to create mask instance');
+		function setup(activeMask) {
+			teardown();
+
+			if (activeMask == null) {
+				return;
 			}
 
-			inputMask = new InputMask(node, { mask: maskPattern });
-			inputMask.unmaskedValue = localValue || '';
+			if (!activeMask) {
+				plainInputHandler = () => {
+					localValue = node.value;
+				};
+				node.addEventListener('input', plainInputHandler);
+				node.value = localValue || '';
+				return;
+			}
 
-			inputMask.on('accept', () => {
-				localValue = inputMask.unmaskedValue;
-				updateIsComplete();
-				lastEdit = new Date();
-				if (debounceDelay) {
-					clearTimeout(timer);
-					timer = setTimeout(() => {
-						dispatch('change', localValue);
-					}, debounceDelay);
+			try {
+				const maskInstance = createMaskInstance(activeMask);
+				if (!maskInstance) {
+					throw new Error('Failed to create mask instance');
 				}
-			});
 
-			inputMask.on('complete', () => {
-				isComplete = true;
-			});
-		} catch (e) {
-			console.error('Error initializing IMask:', e);
-			const handleInput = () => {
-				localValue = node.value;
-				lastEdit = new Date();
-			};
-			node.addEventListener('input', handleInput);
-			node.value = localValue || '';
-			return {
-				destroy() {
-					node.removeEventListener('input', handleInput);
-				}
-			};
+				inputMask = new InputMask(node, { mask: activeMask });
+				inputMask.unmaskedValue = localValue || '';
+
+				inputMask.on('accept', () => {
+					localValue = inputMask.unmaskedValue;
+					updateIsComplete();
+					if (debounceDelay) {
+						clearTimeout(timer);
+						timer = setTimeout(() => {
+							dispatch('change', localValue);
+						}, debounceDelay);
+					}
+				});
+
+				inputMask.on('complete', () => {
+					isComplete = true;
+				});
+			} catch (e) {
+				console.error('Error initializing IMask:', e);
+				plainInputHandler = () => {
+					localValue = node.value;
+				};
+				node.addEventListener('input', plainInputHandler);
+				node.value = localValue || '';
+			}
 		}
 
+		setup(maskPattern);
+
 		return {
+			update(activeMask) {
+				setup(activeMask);
+			},
 			destroy() {
-				if (inputMask) inputMask.destroy();
+				teardown();
 			}
 		};
 	}
 
 	$effect(() => {
-		cellState.reset(value);
+		csm.reset(value);
 	});
 
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
+				csm.focus();
 			}, 50);
 		}
 
@@ -368,22 +369,21 @@
 			if (timer) {
 				clearTimeout(timer);
 			}
-			if (inputMask) {
-				inputMask.destroy();
-			}
 		};
 	});
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
-		} else if (!inEdit) {
-			cellState.goTo('view');
+			csm.goTo('readonly');
+		} else {
+			csm.goTo('view');
 		}
+
+		tabindex = readonly || disabled ? -1 : 0;
 	});
 </script>
 
@@ -391,8 +391,8 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
-	role={baseRole}
-	state={cellState}
+	role={config.role}
+	{csm}
 	{icon}
 	isDirty={isDirty && showDirty}
 	{clearable}
@@ -402,39 +402,19 @@
 	{color}
 	{background}
 >
-	{#key $cellState}
-		{#if icon}
-			<i class={icon + ' field-icon'} class:with-error={error}></i>
-		{/if}
-
-		{#if inEdit}
-			<input
-				bind:this={inputElement}
-				class="editor"
-				{placeholder}
-				disabled={false}
-				style:color={!isComplete ? 'var(--spectrum-global-color-gray-700)' : color}
-				style:text-align={config.align == 'center'
-					? 'center'
-					: config.align == 'flex-end' || config.align == 'right'
-						? 'right'
-						: 'left'}
-				on:focusout={cellState.focusout}
-				on:keydown={cellState.keydown}
-				use:initIMask={mask}
-			/>
-		{:else}
-			<input
-				class="editor"
-				class:placeholder={!value}
-				disabled={true}
-				value={displayValue || placeholder}
-				style:text-align={config.align == 'center'
-					? 'center'
-					: config.align == 'flex-end' || config.align == 'right'
-						? 'right'
-						: 'left'}
-			/>
-		{/if}
+	{#key mask}
+		<input
+			bind:this={editor}
+			class="editor"
+			{tabindex}
+			class:placeholder={!localValue}
+			disabled={$csm != 'editing'}
+			value={$csm === 'editing' ? (localValue ?? '') : (formattedValue ?? '')}
+			{placeholder}
+			style:text-align={config.align}
+			on:focusout={csm.focusout}
+			on:keydown={csm.keydown}
+			use:initIMask={$csm === 'editing' ? mask : null}
+		/>
 	{/key}
 </BaseCell>
