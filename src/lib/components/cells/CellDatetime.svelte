@@ -3,7 +3,7 @@
 	import { DatePicker } from 'date-picker-svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -11,7 +11,7 @@
 	let { id, value, cellOptions = {}, autofocus = false } = $props();
 
 	let anchor = $state(null);
-	let picker = $state();
+	let popup = $state();
 	let timePicker = $state();
 	let dateInput = $state();
 	let open = $state(false);
@@ -38,11 +38,9 @@
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let align = $derived(config.align);
 	let justCopied = $state(false);
-	let inEdit = $derived($cellState === 'editing');
+	let inEdit = $derived($csm === 'editing');
 	let error = $derived(optionError);
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(inEdit && selection);
 	let baseRole = $derived(
 		config.role === 'inlineInput' || config.role === 'inline'
@@ -264,7 +262,7 @@
 
 	let inputShowsPlaceholder = $derived(innerDate == null);
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -275,6 +273,7 @@
 				open = false;
 				selection = false;
 			},
+			mousedown() {},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
 			}
@@ -333,7 +332,8 @@
 				open = false;
 				dispatch('exitedit');
 			},
-			click(e) {
+			mousedown(e) {
+				e.stopPropagation();
 				open = !open;
 			},
 			keydown(e) {
@@ -366,23 +366,18 @@
 				}
 			},
 			focusout(e) {
-				const isInPicker = picker?.contains(e.relatedTarget);
-				const isInTimePicker = timePicker?.contains(e.relatedTarget);
-				const isInDateInput = dateInput?.contains(e.relatedTarget);
-
-				if (isInPicker || isInTimePicker || isInDateInput) return;
+				const target = e.relatedTarget;
+				if (
+					anchor?.contains(target) ||
+					popup?.contains(target) ||
+					timePicker?.contains(target) ||
+					dateInput?.contains(target)
+				) {
+					return;
+				}
 
 				open = false;
-				if (inputDate) {
-					const committed = commitInputDate();
-					if (committed === null) {
-						dispatch('change', null);
-					} else if (committed !== undefined) {
-						dispatch('change', committed);
-					}
-				} else if (selection) {
-					dispatch('change', buildOutputValue());
-				}
+				this.submit();
 				return readonly ? 'readonly' : 'view';
 			},
 			submit() {
@@ -393,10 +388,9 @@
 					} else if (committed !== undefined) {
 						dispatch('change', committed);
 					}
-				} else {
+				} else if (selection) {
 					dispatch('change', buildOutputValue());
 				}
-				return readonly ? 'readonly' : 'view';
 			},
 			cancel() {
 				innerDate = parseValueToDate(originalValue);
@@ -445,7 +439,7 @@
 	};
 
 	const handleClearValue = () => {
-		cellState.submit();
+		csm.submit();
 	};
 
 	const handleTimeChange = (e) => {
@@ -495,11 +489,6 @@
 		syncTimeValue();
 	};
 
-	const togglePicker = (e) => {
-		e.stopPropagation();
-		open = !open;
-	};
-
 	const handleDateChange = (e) => {
 		const newDate = e.detail;
 		selection = true;
@@ -517,8 +506,6 @@
 		syncTimeValue();
 		if (inputDate) {
 			editText = formatDateTime(innerDate, currentDateFormat, currentShowTime);
-		}
-		if (inputDate) {
 			dateInput?.focus();
 		} else {
 			anchor?.focus();
@@ -537,11 +524,9 @@
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
+				csm.focus();
 				if (inputDate) {
 					dateInput?.focus();
-				} else {
-					cellState.click?.();
 				}
 			}, 30);
 		}
@@ -549,13 +534,13 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else if (!inEdit) {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -564,9 +549,9 @@
 <BaseCell
 	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
-	{icon}
+	{csm}
+	bind:anchor
+	icon={optionIcon}
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
@@ -577,98 +562,77 @@
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
+	{#if inputDate}
+		<input
+			bind:this={dateInput}
+			type="text"
+			class="editor"
+			class:placeholder={inputShowsPlaceholder}
+			value={editText}
+			on:input={handleDateInput}
+			on:focusout={csm.focusout}
+			on:click={(e) => e.stopPropagation()}
+			placeholder={dateInputPlaceholder}
+		/>
+	{:else}
+		<span class="value" class:placeholder={!innerDate}>
+			{formattedValue || placeholder}
+		</span>
 	{/if}
-
-	<input
-		bind:this={dateInput}
-		type="text"
-		class="editor"
-		disabled={!inputDate}
-		class:placeholder={inputShowsPlaceholder}
-		value={inEdit ? editText : formattedValue}
-		on:input={handleDateInput}
-		on:focusout={cellState.focusout}
-		on:click={(e) => e.stopPropagation()}
-		placeholder={dateInputPlaceholder}
-	/>
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	{#if $cellState === 'editing' || $cellState === 'view'}
-		<i
-			class="ph ph-calendar-blank calendar-icon control-icon"
-			on:click={togglePicker}
-			role="button"
-			tabindex="-1"
-		></i>
+	{#if $csm === 'editing' || $csm === 'view'}
+		<i class="ph ph-calendar-blank control-icon"></i>
 	{/if}
 </BaseCell>
 
-<PickerPopover
+<SuperPopover
 	{anchor}
-	visible={inEdit}
-	align="right"
 	{open}
+	align="right"
 	maxHeight={400}
 	useAnchorWidth={false}
-	onClose={cellState.focusout}
+	dismissible={false}
+	bind:popup
 >
-	<div
-		bind:this={picker}
-		class="datetime-picker-container"
-		style:--date-picker-background="var(--spectrum-global-color-gray-75)"
-		style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
-		style:--date-picker-selected-background="var(--accent-color)"
-	>
-		<!-- svelte-ignore event_directive_deprecated -->
-		<DatePicker value={innerDate ?? new Date()} on:select={handleDateChange} />
+	{#snippet children()}
+		<div
+			class="datetime-picker-container"
+			style:--date-picker-background="var(--spectrum-global-color-gray-75)"
+			style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
+			style:--date-picker-selected-background="var(--accent-color)"
+		>
+			<!-- svelte-ignore event_directive_deprecated -->
+			<DatePicker value={innerDate ?? new Date()} on:select={handleDateChange} />
 
-		{#if currentShowTime}
-			<div class="time-section">
-				<!-- svelte-ignore a11y_label_has_associated_control -->
-				<!-- svelte-ignore event_directive_deprecated -->
-				<input
-					bind:this={timePicker}
-					type="text"
-					placeholder={show24HTime ? 'HH:MM' : 'HH:MM AM/PM'}
-					bind:value={timeValue}
-					on:change={handleTimeChange}
-					on:focusout={cellState.focusout}
-					class="time-input"
-				/>
-				<div class="time-buttons">
+			{#if currentShowTime}
+				<div class="time-section">
+					<!-- svelte-ignore a11y_label_has_associated_control -->
 					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="time-button start-button" on:click={handleStartTime}>Start</button>
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="time-button end-button" on:click={handleEndTime}>End</button>
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="time-button now-button" on:click={handleNowTime}>Now</button>
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="time-button clear-button" on:click={handleClearValue}>Select</button>
+					<input
+						bind:this={timePicker}
+						type="text"
+						placeholder={show24HTime ? 'HH:MM' : 'HH:MM AM/PM'}
+						bind:value={timeValue}
+						on:change={handleTimeChange}
+						on:focusout={csm.focusout}
+						class="time-input"
+					/>
+					<div class="time-buttons">
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button class="time-button start-button" on:click={handleStartTime}>Start</button>
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button class="time-button end-button" on:click={handleEndTime}>End</button>
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button class="time-button now-button" on:click={handleNowTime}>Now</button>
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button class="time-button clear-button" on:click={handleClearValue}>Select</button>
+					</div>
 				</div>
-			</div>
-		{/if}
-	</div>
-</PickerPopover>
+			{/if}
+		</div>
+	{/snippet}
+</SuperPopover>
 
 <style>
-	.datetime-display {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		flex: 1 1 auto;
-		min-width: 0;
-		height: 100%;
-		padding: 0.25rem 0.75rem;
-		box-sizing: border-box;
-		cursor: inherit;
-	}
-
-	.datetime-display.inline {
-		padding: 0.25rem;
-	}
-
 	.datetime-picker-container {
 		display: contents;
 		flex-direction: column;
@@ -678,6 +642,7 @@
 		min-height: fit-content;
 		z-index: 1000;
 	}
+
 	.time-section {
 		display: flex;
 		flex-direction: column;
@@ -726,5 +691,27 @@
 		outline: none;
 		border-color: var(--spectrum-global-color-blue-500);
 		box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+	}
+
+	span.value {
+		font-style: inherit;
+		font-size: 13px;
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		cursor: inherit;
+		padding: 0.25rem 0.75rem;
+	}
+
+	.value.placeholder {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
 	}
 </style>

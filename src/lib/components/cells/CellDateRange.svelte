@@ -4,7 +4,7 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import { copyTextToClipboard } from './cellClipboard';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -12,7 +12,7 @@
 	let { id, value, cellOptions = {}, autofocus = false } = $props();
 
 	let anchor = $state(null);
-	let picker = $state();
+	let popup = $state();
 	let open = $state(false);
 	let originalValue = $state(null);
 	let localValue = $state(null);
@@ -31,7 +31,6 @@
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let align = $derived(config.align);
 
 	let justCopied = $state(false);
 	let fromTime = $derived(currentShowTime && localValue?.fromTime ? localValue.fromTime : '00:00');
@@ -48,9 +47,8 @@
 			? new Date(`${toDate.toISOString().split('T')[0]}T${toTime}`)
 			: toDate
 	);
-	let inEdit = $derived($cellState === 'editing');
+	let inEdit = $derived($csm === 'editing');
 	let error = $derived(optionError);
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(inEdit && JSON.stringify(localValue) != JSON.stringify(originalValue));
 	let baseRole = $derived(
 		config.role === 'inlineInput' || config.role === 'inline'
@@ -208,13 +206,14 @@
 
 	let showPlaceholder = $derived(!localValue?.from && !localValue?.to);
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
 			}
 		},
 		view: {
+			mousedown() {},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
 			}
@@ -246,14 +245,15 @@
 		editing: {
 			_enter() {
 				originalValue = localValue ? { ...localValue } : null;
-				open = false;
+				open = true;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			click() {
+			mousedown(e) {
+				e.stopPropagation();
 				open = !open;
 			},
 			keydown(e) {
@@ -268,16 +268,23 @@
 				}
 			},
 			focusout(e) {
-				const isInPicker = picker?.contains(e.relatedTarget);
-				const isInFromTime = fromTimePicker?.contains?.(e.relatedTarget);
-				const isInToTime = toTimePicker?.contains?.(e.relatedTarget);
+				const target = e.relatedTarget;
+				if (
+					anchor?.contains(target) ||
+					popup?.contains(target) ||
+					fromTimePicker?.contains?.(target) ||
+					toTimePicker?.contains?.(target)
+				) {
+					return;
+				}
 
-				if (!isInPicker && !isInFromTime && !isInToTime) {
-					open = false;
-					if (JSON.stringify(localValue) != JSON.stringify(originalValue)) {
-						dispatch('change', localValue);
-					}
-					return readonly ? 'readonly' : 'view';
+				open = false;
+				this.submit();
+				return readonly ? 'readonly' : 'view';
+			},
+			submit() {
+				if (JSON.stringify(localValue) != JSON.stringify(originalValue)) {
+					dispatch('change', localValue);
 				}
 			},
 			cancel() {
@@ -346,21 +353,20 @@
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
-				cellState.click?.();
+				csm.focus();
 			}, 30);
 		}
 	});
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && (localValue?.from || localValue?.to)) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else if (!inEdit) {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -369,9 +375,9 @@
 <BaseCell
 	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
-	{icon}
+	{csm}
+	bind:anchor
+	icon={optionIcon}
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
@@ -382,131 +388,117 @@
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
+	<span class="value" class:placeholder={showPlaceholder}>
+		{rangeDisplay}
+	</span>
+	{#if $csm === 'editing' || $csm === 'view'}
+		<i class="ph ph-calendar-blank control-icon"></i>
 	{/if}
-
-	<div
-		class="datetime-display"
-		class:placeholder={showPlaceholder}
-		class:inline={baseRole === 'inline'}
-		style:justify-content={align}
-	>
-		<span class:placeholder={showPlaceholder}>{rangeDisplay}</span>
-		{#if inEdit}
-			<i class="ph ph-calendar-blank calendar-icon"></i>
-			{#if localValue && showDirty != false}
-				<!-- svelte-ignore event_directive_deprecated -->
-				<button
-					class="clear-button ph ph-x"
-					on:click|stopPropagation={clearRange}
-					aria-label="Clear date range"
-				></button>
-			{/if}
+	{#if $csm === 'editing'}
+		{#if localValue && showDirty != false}
+			<!-- svelte-ignore event_directive_deprecated -->
+			<button
+				class="clear-button ph ph-x"
+				on:click|stopPropagation={clearRange}
+				aria-label="Clear date range"
+			></button>
 		{/if}
-	</div>
+	{/if}
 </BaseCell>
 
-<PickerPopover
+<SuperPopover
 	{anchor}
-	visible={inEdit}
-	align="right"
 	{open}
+	align="right"
 	maxHeight={400}
 	useAnchorWidth={false}
 	dismissible={false}
+	bind:popup
 >
-	<div
-		bind:this={picker}
-		class="range-picker-container"
-		style:--date-picker-background="var(--spectrum-global-color-gray-75)"
-		style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
-		style:--date-picker-selected-background="var(--accent-color)"
-	>
-		<div class="datepickers-container">
-			<div class="range-section">
-				<!-- svelte-ignore a11y_label_has_associated_control -->
-				<span class="range-label">From:</span>
-				<!-- svelte-ignore event_directive_deprecated -->
-				<DatePicker value={fromDate} on:select={handleFromDateChange} />
+	{#snippet children()}
+		<div
+			class="range-picker-container"
+			style:--date-picker-background="var(--spectrum-global-color-gray-75)"
+			style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
+			style:--date-picker-selected-background="var(--accent-color)"
+		>
+			<div class="datepickers-container">
+				<div class="range-section">
+					<!-- svelte-ignore a11y_label_has_associated_control -->
+					<span class="range-label">From:</span>
+					<!-- svelte-ignore event_directive_deprecated -->
+					<DatePicker value={fromDate} on:select={handleFromDateChange} />
 
-				{#if currentShowTime}
-					<div class="time-section">
-						<!-- svelte-ignore event_directive_deprecated -->
-						<input
-							bind:this={fromTimePicker}
-							type="time"
-							value={fromTime}
-							on:change={handleFromTimeChange}
-							class="time-input"
-							step="900"
-						/>
-					</div>
-				{/if}
+					{#if currentShowTime}
+						<div class="time-section">
+							<!-- svelte-ignore event_directive_deprecated -->
+							<input
+								bind:this={fromTimePicker}
+								type="time"
+								value={fromTime}
+								on:change={handleFromTimeChange}
+								class="time-input"
+								step="900"
+							/>
+						</div>
+					{/if}
+				</div>
+
+				<div class="range-section">
+					<!-- svelte-ignore a11y_label_has_associated_control -->
+					<span class="range-label">To:</span>
+					<!-- svelte-ignore event_directive_deprecated -->
+					<DatePicker value={toDate} min={fromDate} on:select={handleToDateChange} />
+
+					{#if currentShowTime}
+						<div class="time-section">
+							<!-- svelte-ignore event_directive_deprecated -->
+							<input
+								bind:this={toTimePicker}
+								type="time"
+								value={toTime}
+								on:change={handleToTimeChange}
+								class="time-input"
+								step="900"
+							/>
+						</div>
+					{/if}
+				</div>
 			</div>
 
-			<div class="range-section">
-				<!-- svelte-ignore a11y_label_has_associated_control -->
-				<span class="range-label">To:</span>
-				<!-- svelte-ignore event_directive_deprecated -->
-				<DatePicker value={toDate} min={fromDate} on:select={handleToDateChange} />
-
-				{#if currentShowTime}
-					<div class="time-section">
-						<!-- svelte-ignore event_directive_deprecated -->
-						<input
-							bind:this={toTimePicker}
-							type="time"
-							value={toTime}
-							on:change={handleToTimeChange}
-							class="time-input"
-							step="900"
-						/>
-					</div>
-				{/if}
-			</div>
+			{#if !isValidRange}
+				<div class="range-error">
+					<i class="ph ph-warning" style="color: var(--spectrum-global-color-red-500);"></i>
+					<span style="color: var(--spectrum-global-color-red-500); font-size: 12px;">
+						End date cannot be before start date
+					</span>
+				</div>
+			{/if}
 		</div>
-
-		{#if !isValidRange}
-			<div class="range-error">
-				<i class="ph ph-warning" style="color: var(--spectrum-global-color-red-500);"></i>
-				<span style="color: var(--spectrum-global-color-red-500); font-size: 12px;">
-					End date cannot be before start date
-				</span>
-			</div>
-		{/if}
-	</div>
-</PickerPopover>
+	{/snippet}
+</SuperPopover>
 
 <style>
-	.datetime-display {
+	span.value {
+		font-style: inherit;
+		font-size: 13px;
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		flex: 1 1 auto;
-		min-width: 0;
 		height: 100%;
-		padding: 0.25rem 0.75rem;
-		box-sizing: border-box;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
 		cursor: inherit;
+		padding: 0.25rem 0.75rem;
 	}
 
-	.datetime-display.inline {
-		padding: 0.25rem;
-	}
-
-	.datetime-display.placeholder,
-	.datetime-display.placeholder > span,
-	.datetime-display > span.placeholder {
-		font-style: italic;
-		color: var(--spectrum-global-color-gray-600);
-	}
-
-	.calendar-icon {
-		font-size: 16px;
-		flex-shrink: 0;
-		margin-left: 0.5rem;
-		color: var(--spectrum-global-color-gray-600);
+	.value.placeholder {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
 	}
 
 	.range-picker-container {
