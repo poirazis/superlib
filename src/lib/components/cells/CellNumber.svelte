@@ -368,14 +368,6 @@
 
 		tabindex = readonly || disabled ? -1 : 0;
 	});
-
-	$effect(() => {
-		console.log('Value', value);
-	});
-
-	$effect(() => {
-		console.log('Local Value', localValue);
-	});
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->

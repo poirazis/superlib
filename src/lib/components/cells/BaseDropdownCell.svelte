@@ -34,6 +34,7 @@
 	let role = $derived(cellOptions?.role);
 	let error = $derived(cellOptions?.error);
 	let icon = $derived(cellOptions?.icon);
+	let _message = $state<string | null>(null);
 
 	let anchor = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | null>(null);
@@ -50,8 +51,19 @@
 			goTo: (state) => state
 		},
 		view: {
-			mousedown: () => {},
+			mousedown: () => {
+				csm.focus({});
+			},
 			focus: (e) => {
+				if (options.length === 0) {
+					console.warn('No options available for dropdown');
+					_message = 'No options available';
+					setTimeout(() => {
+						_message = null;
+					}, 1000);
+					return;
+				}
+
 				anchor?.focus();
 				return 'editing';
 			}
@@ -61,7 +73,6 @@
 				open = true;
 			},
 			_exit: () => {
-				console.log('Selected value:', localValue);
 				dispatch('change', localValue?.value);
 				open = false;
 			},
@@ -147,7 +158,7 @@
 <BaseCell {id} bind:anchor {csm} {role} {error} {icon} popupOpen={open}>
 	{#if !inputSelect}
 		<span class="value" class:placeholder={!localValue?.value}
-			>{localValue?.label || cellOptions?.placeholder}</span
+			>{_message || localValue?.label || cellOptions?.placeholder}</span
 		>
 	{:else}
 		<input
@@ -155,7 +166,7 @@
 			class="editor"
 			{tabindex}
 			class:placeholder={!localValue?.value}
-			value={localValue?.value}
+			value={_message || localValue?.value}
 			placeholder={cellOptions?.placeholder}
 			style:text-align={cellOptions.align}
 			on:input={csm.debounce}
