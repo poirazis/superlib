@@ -193,22 +193,6 @@
 		background: var(--spectrum-global-color-gray-100);
 	}
 
-	.cell-tooltip {
-		position: fixed;
-		z-index: 10000;
-		max-width: 20rem;
-		padding: 0.35rem 0.5rem;
-		border-radius: 0.25rem;
-		background: var(--spectrum-global-color-gray-800);
-		color: var(--spectrum-global-color-gray-50);
-		font-family: 'inter', sans-serif;
-		font-size: 11px;
-		line-height: 1.35;
-		white-space: normal;
-		box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
-		pointer-events: none;
-	}
-
 	.super-cell.justCopied {
 		border-color: rgb(from var(--spectrum-global-color-static-green-400) r g b / 0.75) !important;
 	}
@@ -336,6 +320,9 @@
 		outline: none;
 		cursor: inherit;
 		padding: var(--super-cell-padding);
+	}
+	:global(.super-cell > input.disabled.editor) {
+		background: transparent;
 	}
 	:global(.super-cell.inline > input.editor) {
 		padding: 0.25rem 0.25rem !important;

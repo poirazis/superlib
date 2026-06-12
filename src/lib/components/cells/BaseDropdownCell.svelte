@@ -259,9 +259,6 @@
 		}
 	});
 
-	$effect(() => {
-		console.log(localValue);
-	});
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->

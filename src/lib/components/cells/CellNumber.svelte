@@ -3,6 +3,7 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { tooltip } from '../../actions/tooltip';
 	import CellNumberStepper from './CellNumberStepper.svelte';
 	import './CellCommon.css';
 
@@ -67,6 +68,8 @@
 		}
 		return formatted;
 	});
+
+	let isEmpty = $derived(formattedValue === '' || formattedValue == null);
 
 	let clearable = $derived(clearValueEnabled && inEdit && editText !== '');
 	let tabindex = $state(0);
@@ -133,6 +136,9 @@
 		},
 		view: {
 			_enter() {},
+			click() {
+				return this.focus();
+			},
 			focus() {
 				if (!readonly && !disabled && !calculated) {
 					return 'editing';
@@ -336,7 +342,7 @@
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
+				csm.focus();
 			}, 50);
 		}
 
@@ -361,6 +367,7 @@
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
@@ -374,30 +381,67 @@
 	{color}
 	{background}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
-	{/if}
-
-	<input
-		bind:this={editor}
-		class="editor"
-		class:placeholder={!localValue}
-		style:text-align={align}
-		{tabindex}
-		disabled={$csm != 'editing'}
-		value={inEdit ? editText : formattedValue}
-		{placeholder}
-		on:keydown={csm.keydown}
-		on:input={csm.handleInput}
-		on:wheel={(e) => {
-			if (inEdit) csm.handleWheel(e);
-		}}
-	/>
-
-	{#if showStepper && inEdit}
-		<CellNumberStepper
-			onIncrement={(e) => csm.increment(e)}
-			onDecrement={(e) => csm.decrement(e)}
+	{#if inEdit}
+		<input
+			bind:this={editor}
+			class="editor"
+			class:placeholder={!localValue}
+			style:text-align={align}
+			{tabindex}
+			value={editText}
+			{placeholder}
+			on:keydown={csm.keydown}
+			on:input={csm.handleInput}
+			on:wheel={(e) => csm.handleWheel(e)}
 		/>
+
+		{#if showStepper}
+			<CellNumberStepper
+				onIncrement={(e) => csm.increment(e)}
+				onDecrement={(e) => csm.decrement(e)}
+			/>
+		{/if}
+	{:else}
+		<span class="value" class:placeholder={isEmpty}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="value-content" use:tooltip style:text-align={align} on:click={csm.click}>
+				{isEmpty ? placeholder : formattedValue}
+			</div>
+		</span>
 	{/if}
 </BaseCell>
+
+<style>
+	span.value {
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		cursor: inherit;
+		padding: 0.25rem 0.75rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.value-content {
+		min-width: 0;
+		flex: 1;
+		font-style: inherit;
+		font-size: 13px;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	.value.placeholder .value-content {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
+	}
+</style>
