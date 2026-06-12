@@ -11,6 +11,11 @@
 		}
 	}
 
+	const MASK_OPTIONS = {
+		lazy: false,
+		placeholderChar: '0'
+	};
+
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -27,10 +32,11 @@
 	} = $props();
 
 	let timer = $state();
-	let localValue = $state(null);
+	let localValue = $state('');
 	let originalValue = $state();
 	let inputMask = $state();
-	let editor = $state();
+	let editor = $state(null);
+	let anchor = $state(null);
 	let errors = $state([]);
 	let isComplete = $state(false);
 	let justCopied = $state(false);
@@ -48,28 +54,73 @@
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
+	let valueMode = $derived(config.valueMode ?? 'unmasked');
+
+	function resolveHasMask(maskPattern) {
+		if (!maskPattern) return false;
+		if (Array.isArray(maskPattern)) return maskPattern.length > 0;
+		if (typeof maskPattern === 'string') return maskPattern.length > 0;
+		return true;
+	}
+
+	function resolveMaskPreview(maskPattern) {
+		if (!maskPattern) return '';
+		if (Array.isArray(maskPattern)) {
+			const first = maskPattern[0];
+			return typeof first === 'string' ? first : (first?.mask ?? '');
+		}
+		if (typeof maskPattern === 'string') return maskPattern;
+		return maskPattern.mask ?? '';
+	}
+
+	function normalizeMaskEntry(entry) {
+		if (typeof entry === 'string') return { mask: entry, ...MASK_OPTIONS };
+		const { expose, ...rest } = entry;
+		return expose === undefined
+			? { ...MASK_OPTIONS, ...rest }
+			: { ...MASK_OPTIONS, ...rest, expose };
+	}
+
+	function buildInputMaskOptions(maskPattern) {
+		if (!maskPattern) return null;
+
+		if (Array.isArray(maskPattern)) {
+			return { mask: maskPattern.map(normalizeMaskEntry) };
+		}
+
+		if (typeof maskPattern === 'string') {
+			return { mask: maskPattern, ...MASK_OPTIONS };
+		}
+
+		return { ...MASK_OPTIONS, ...maskPattern };
+	}
 
 	function createMaskInstance(maskPattern) {
 		if (!maskPattern) return null;
+
+		const options = buildInputMaskOptions(maskPattern);
+		if (!options) return null;
+
 		try {
-			return new MaskedPattern({
-				mask: maskPattern,
-				lazy: false,
-				placeholderChar: '_'
-			});
-		} catch (patternError) {
+			return createMask(options);
+		} catch (createError) {
+			if (typeof maskPattern !== 'string') {
+				console.error('Failed to create mask:', maskPattern, createError?.message);
+				return null;
+			}
+
 			try {
-				return new MaskedRegExp({
-					mask: new RegExp(maskPattern),
-					lazy: false
+				return new MaskedPattern({
+					mask: maskPattern,
+					...MASK_OPTIONS
 				});
-			} catch (regexError) {
+			} catch (patternError) {
 				try {
-					return createMask({
-						mask: maskPattern,
+					return new MaskedRegExp({
+						mask: new RegExp(maskPattern),
 						lazy: false
 					});
-				} catch (createError) {
+				} catch (regexError) {
 					console.error('Failed to create mask:', maskPattern, {
 						patternError: patternError?.message,
 						regexError: regexError?.message,
@@ -81,16 +132,52 @@
 		}
 	}
 
+	function readMaskValue(maskRef = inputMask) {
+		if (!maskRef) return '';
+		return valueMode === 'formatted' ? maskRef.value : maskRef.unmaskedValue;
+	}
+
+	function isDynamicMask(maskPattern = mask) {
+		return Array.isArray(maskPattern);
+	}
+
+	function appendEmptyMaskPlaceholder(maskRef = inputMask) {
+		if (!maskRef?.masked) return;
+		const masked = maskRef.masked;
+		if (masked.exposeMask) {
+			masked.currentMask = masked.exposeMask;
+		}
+		masked._appendPlaceholder();
+		maskRef.updateControl();
+	}
+
+	function syncMaskValue(nextValue = localValue) {
+		if (!inputMask) return;
+		const next = nextValue ?? '';
+
+		if (!next && isDynamicMask()) {
+			appendEmptyMaskPlaceholder();
+			return;
+		}
+
+		if (valueMode === 'formatted') {
+			inputMask.value = next;
+			return;
+		}
+		inputMask.unmaskedValue = next;
+	}
+
 	function applyMask(rawValue) {
-		if (!mask || !rawValue) return rawValue;
+		if (!hasMask) return rawValue ?? '';
+		if (valueMode === 'formatted') return rawValue ?? '';
 		const tempMask = createMaskInstance(mask);
-		if (!tempMask) return rawValue;
-		tempMask.unmaskedValue = rawValue;
+		if (!tempMask) return rawValue ?? '';
+		tempMask.unmaskedValue = rawValue || '';
 		return tempMask.value;
 	}
 
 	function updateIsComplete() {
-		if (!mask || !localValue) {
+		if (!hasMask || !localValue) {
 			isComplete = false;
 			return;
 		}
@@ -100,24 +187,30 @@
 			isComplete = false;
 			return;
 		}
-		tempMask.resolve(localValue);
+		if (valueMode === 'formatted') {
+			tempMask.value = localValue;
+		} else {
+			tempMask.unmaskedValue = localValue;
+		}
 		isComplete = tempMask.isComplete;
 	}
 
-	function syncEditorValue() {
-		if (inputMask) {
-			inputMask.unmaskedValue = localValue || '';
-			return;
-		}
-		if (editor) {
-			editor.value = localValue || '';
-		}
-	}
-
-	let placeholder = $derived(config.placeholder || mask || '');
+	let hasMask = $derived(resolveHasMask(mask));
+	let imaskActive = $derived($csm === 'editing' && hasMask);
+	let placeholder = $derived(hasMask ? '' : config.placeholder || resolveMaskPreview(mask) || '');
 	let formattedValue = $derived(applyMask(value));
-	let error = $derived(optionError || errors.length > 0 || !!(localValue && mask && !isComplete));
-	let isDirty = $derived(originalValue !== localValue);
+	let viewDisplayValue = $derived(
+		value != null && value !== ''
+			? formattedValue
+			: resolveMaskPreview(mask) || formattedValue || ''
+	);
+	let inputValue = $derived(
+		imaskActive ? undefined : $csm === 'editing' ? (localValue ?? '') : (viewDisplayValue ?? '')
+	);
+	let error = $derived(
+		optionError || errors.length > 0 || !!(localValue && hasMask && !isComplete)
+	);
+	let isDirty = $derived((originalValue ?? '') !== (localValue ?? ''));
 	let clearable = $derived(
 		config.clearIcon !== false &&
 			config.role != 'tableCell' &&
@@ -133,16 +226,16 @@
 			},
 			reset(newValue) {
 				if (newValue == localValue) return;
-				localValue = value;
+				localValue = value ?? '';
 				updateIsComplete();
-				syncEditorValue();
+				syncMaskValue(value ?? '');
 				errors = [];
 				return initialState;
 			}
 		},
 		view: {
 			_enter() {
-				localValue = value;
+				localValue = value ?? '';
 				updateIsComplete();
 			},
 			focus() {
@@ -153,15 +246,18 @@
 		},
 		readonly: {
 			_enter() {
-				localValue = value;
+				localValue = value ?? '';
 			}
 		},
 		copyable: {
 			_enter() {
-				localValue = value;
+				localValue = value ?? '';
 			},
 			click() {
-				copyTextToClipboard(formattedValue || String(value ?? ''), (copied) => (justCopied = copied));
+				copyTextToClipboard(
+					formattedValue || String(value ?? ''),
+					(copied) => (justCopied = copied)
+				);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -172,19 +268,20 @@
 		},
 		disabled: {
 			_enter() {
-				localValue = value;
+				localValue = value ?? '';
 			}
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
-				localValue = value;
+				originalValue = value ?? '';
+				localValue = value ?? '';
+				isComplete = false;
 				updateIsComplete();
 				dispatch('enteredit');
-				setTimeout(() => {
+				queueMicrotask(() => {
+					syncMaskValue(localValue);
 					editor?.focus();
-				}, 50);
-				syncEditorValue();
+				});
 			},
 			_exit() {
 				originalValue = undefined;
@@ -192,53 +289,32 @@
 			},
 			focus() {},
 			clear() {
-				localValue = null;
+				localValue = '';
+				isComplete = false;
 				updateIsComplete();
-				syncEditorValue();
+				syncMaskValue('');
 				dispatch('clear', null);
 			},
-			focusout() {
+			focusout(e) {
+				if (anchor?.contains(e?.relatedTarget)) return;
 				dispatch('focusout');
 				this.submit();
 			},
 			submit() {
 				if (isDirty) {
-					if (mask && localValue && !isComplete) {
-						localValue = originalValue;
-						updateIsComplete();
-						syncEditorValue();
-						return initialState;
-					}
-					dispatch('change', localValue);
+					dispatch('change', localValue ?? '');
 				}
 				return initialState;
 			},
 			cancel() {
-				localValue = originalValue;
+				localValue = originalValue ?? '';
 				updateIsComplete();
 				dispatch('cancel');
-				syncEditorValue();
+				syncMaskValue(localValue);
 				return initialState;
 			},
 			keydown(e) {
 				if (!e) return;
-
-				const allowedKeysWhenComplete = [
-					'Backspace',
-					'Delete',
-					'Enter',
-					'Escape',
-					'ArrowLeft',
-					'ArrowRight',
-					'ArrowUp',
-					'ArrowDown',
-					'Home',
-					'End'
-				];
-				if (isComplete && !allowedKeysWhenComplete.includes(e.key) && e.key.length === 1) {
-					e.preventDefault();
-					return;
-				}
 
 				if (e.key === 'Enter') {
 					e.preventDefault();
@@ -248,16 +324,15 @@
 					e.preventDefault();
 					this.cancel();
 				}
-
-				if (e.key.length === 1 && mask) {
-					const tempMask = createMaskInstance(mask);
-					if (tempMask) {
-						const placeholderChar =
-							tempMask.blocks?.[0]?.placeholder || (tempMask.mask?.includes('0') ? '0' : null);
-						if (placeholderChar === '0' && !/\d/.test(e.key)) {
-							e.preventDefault();
-						}
-					}
+			},
+			input(e) {
+				if (hasMask) return;
+				localValue = e.currentTarget.value;
+				if (debounceDelay) {
+					clearTimeout(timer);
+					timer = setTimeout(() => {
+						dispatch('change', localValue);
+					}, debounceDelay);
 				}
 			}
 		}
@@ -300,7 +375,7 @@
 				return;
 			}
 
-			if (!activeMask) {
+			if (!resolveHasMask(activeMask)) {
 				plainInputHandler = () => {
 					localValue = node.value;
 				};
@@ -309,17 +384,19 @@
 				return;
 			}
 
-			try {
-				const maskInstance = createMaskInstance(activeMask);
-				if (!maskInstance) {
-					throw new Error('Failed to create mask instance');
-				}
+			const options = buildInputMaskOptions(activeMask);
+			if (!options) return;
 
-				inputMask = new InputMask(node, { mask: activeMask });
-				inputMask.unmaskedValue = localValue || '';
+			try {
+				if (!(localValue ?? '')) {
+					node.value = '';
+				}
+				inputMask = new InputMask(node, options);
+				syncMaskValue(localValue ?? '');
 
 				inputMask.on('accept', () => {
-					localValue = inputMask.unmaskedValue;
+					if ($csm !== 'editing') return;
+					localValue = readMaskValue(inputMask);
 					updateIsComplete();
 					if (debounceDelay) {
 						clearTimeout(timer);
@@ -355,10 +432,6 @@
 	}
 
 	$effect(() => {
-		csm.reset(value);
-	});
-
-	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
 				csm.focus();
@@ -373,6 +446,8 @@
 	});
 
 	$effect(() => {
+		if ($csm === 'editing') return;
+
 		if (disabled) {
 			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
@@ -394,6 +469,7 @@
 	role={config.role}
 	{csm}
 	{icon}
+	bind:anchor
 	isDirty={isDirty && showDirty}
 	{clearable}
 	{error}
@@ -409,12 +485,12 @@
 			{tabindex}
 			class:placeholder={!localValue}
 			disabled={$csm != 'editing'}
-			value={$csm === 'editing' ? (localValue ?? '') : (formattedValue ?? '')}
+			{...inputValue === undefined ? {} : { value: inputValue }}
 			{placeholder}
 			style:text-align={config.align}
-			on:focusout={csm.focusout}
+			on:input={csm.input}
 			on:keydown={csm.keydown}
-			use:initIMask={$csm === 'editing' ? mask : null}
+			use:initIMask={imaskActive ? mask : null}
 		/>
 	{/key}
 </BaseCell>
