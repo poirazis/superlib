@@ -1,4 +1,6 @@
 <script>
+	import { tooltip } from '../../actions/tooltip';
+
 	let {
 		labelPos,
 		multirow,
@@ -13,70 +15,9 @@
 		children
 	} = $props();
 
-	let showTooltip = $state(false);
 	let labelElement = $state();
-	let tooltipTimer = $state();
-	let tooltipContent = $state('');
-	let tooltipCoords = $state({ top: 0, left: 0 });
-
-	const checkIfTruncated = () => {
-		return labelElement && labelElement.scrollWidth > labelElement.offsetWidth;
-	};
-
-	const buildTooltipContent = () => {
-		const parts = [];
-		if (checkIfTruncated()) {
-			parts.push(label || field);
-		}
-
-		if (helpText) {
-			parts.push(helpText);
-		}
-
-		return parts.join(' - ');
-	};
-
-	const positionTooltip = () => {
-		if (!labelElement) return;
-		const rect = labelElement.getBoundingClientRect();
-		tooltipCoords = {
-			top: rect.bottom + 4,
-			left: rect.left
-		};
-	};
-
-	const showHelpTooltip = () => {
-		if (!helpText && !isLabelTruncated) return;
-		if (tooltipTimer) clearTimeout(tooltipTimer);
-		tooltipTimer = setTimeout(() => {
-			tooltipContent = buildTooltipContent();
-			positionTooltip();
-			showTooltip = true;
-		}, 500);
-	};
-
-	const hideHelpTooltip = () => {
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-			tooltipTimer = null;
-		}
-		showTooltip = false;
-	};
-
-	$effect(() => {
-		return () => {
-			if (tooltipTimer) {
-				clearTimeout(tooltipTimer);
-			}
-		};
-	});
 
 	let width = $derived(labelPos == 'left' ? (labelWidth ? labelWidth : '6rem') : 'auto');
-	let isLabelTruncated = $derived.by(() => {
-		label;
-		field;
-		return checkIfTruncated();
-	});
 </script>
 
 <div
@@ -99,9 +40,8 @@
 			<div
 				bind:this={labelElement}
 				class="label"
-				class:has-interaction={helpText || isLabelTruncated}
-				onmouseenter={showHelpTooltip}
-				onmouseleave={hideHelpTooltip}
+				class:has-interaction={!!helpText}
+				use:tooltip={{ whenTruncated: !helpText }}
 			>
 				{label || field}
 			</div>
@@ -117,17 +57,6 @@
 		{@render children?.()}
 	</div>
 </div>
-
-{#if showTooltip && tooltipContent}
-	<div
-		class="label-tooltip"
-		role="tooltip"
-		style:top="{tooltipCoords.top}px"
-		style:left="{tooltipCoords.left}px"
-	>
-		{tooltipContent}
-	</div>
-{/if}
 
 <style>
 	.super-field {
@@ -221,21 +150,5 @@
 			font-size: 10px;
 			white-space: nowrap;
 		}
-	}
-
-	.label-tooltip {
-		position: fixed;
-		z-index: 10000;
-		max-width: 20rem;
-		padding: 0.35rem 0.5rem;
-		border-radius: 0.25rem;
-		background: var(--spectrum-global-color-gray-800);
-		color: var(--spectrum-global-color-gray-50);
-		font-family: 'inter', sans-serif;
-		font-size: 11px;
-		line-height: 1.35;
-		white-space: normal;
-		box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
-		pointer-events: none;
 	}
 </style>

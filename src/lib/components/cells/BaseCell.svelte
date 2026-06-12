@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
 	interface BaseCellProps {
 		role?: string;
 		csm?: any; // state machine instance
@@ -75,7 +74,6 @@
 	on:focusout={csm.focusout}
 	on:click={csm.click}
 	on:keydown={csm.keydown}
-	on:mousedown={csm.mousedown}
 >
 	{#if error || icon}
 		<!-- svelte-ignore a11y_interactive_supports_focus -->
@@ -196,6 +194,22 @@
 	.super-cell.copyable:focus {
 		border-color: var(--spectrum-global-color-gray-400);
 		background: var(--spectrum-global-color-gray-100);
+	}
+
+	.cell-tooltip {
+		position: fixed;
+		z-index: 10000;
+		max-width: 20rem;
+		padding: 0.35rem 0.5rem;
+		border-radius: 0.25rem;
+		background: var(--spectrum-global-color-gray-800);
+		color: var(--spectrum-global-color-gray-50);
+		font-family: 'inter', sans-serif;
+		font-size: 11px;
+		line-height: 1.35;
+		white-space: normal;
+		box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+		pointer-events: none;
 	}
 
 	.super-cell.copyable.justCopied {
@@ -319,7 +333,7 @@
 		display: flex;
 		align-items: center;
 		height: 100%;
-		background: transparent;
+		background: var(--spectrum-global-color-gray-50);
 		color: inherit;
 		border: none;
 		outline: none;

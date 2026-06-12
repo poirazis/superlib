@@ -287,10 +287,6 @@
 			csm.goTo('view');
 		}
 	});
-
-	$effect(() => {
-		console.log('Local Value changed:', localValue);
-	});
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
