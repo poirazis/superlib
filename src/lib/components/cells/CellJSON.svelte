@@ -2,7 +2,7 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -39,7 +39,7 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let placeholder = $derived(config.placeholder);
 
-	let justCopied = $state(false);
+
 	let multiline = $derived(
 		config.multiline || config.controlType === 'multiline' || config.controlType === 'textarea'
 	);
@@ -146,7 +146,7 @@
 				localValue = normalizedValue;
 			},
 			click() {
-				copyTextToClipboard(String(displayValue ?? ''), (copied) => (justCopied = copied));
+				copyAndTransition(() => cellState, String(displayValue ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -155,6 +155,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {
 				localValue = normalizedValue;
@@ -279,7 +280,6 @@
 	isDirty={isDirty && showDirty}
 	{clearable}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

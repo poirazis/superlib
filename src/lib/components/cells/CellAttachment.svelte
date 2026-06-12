@@ -11,7 +11,7 @@
 		uploadAttachments,
 		type AttachmentItem
 	} from './attachmentUtils.js';
-	import { copyTextToClipboard } from './cellClipboard.js';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -56,7 +56,7 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let baseRole = $derived(mapCellRole(config.role));
 
-	let justCopied = $state(false);
+
 	let error = $derived(optionError);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(
@@ -118,10 +118,7 @@
 				open = false;
 			},
 			click() {
-				copyTextToClipboard(
-					attachmentCopyText(localvalue),
-					(copied: boolean) => (justCopied = copied)
-				);
+				copyAndTransition(() => cellState, attachmentCopyText(localvalue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -130,6 +127,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {
 				open = false;
@@ -233,7 +231,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

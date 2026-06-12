@@ -12,7 +12,7 @@
 		uploadAttachments,
 		type AttachmentItem
 	} from './attachmentUtils.js';
-	import { copyTextToClipboard } from './cellClipboard.js';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -60,7 +60,7 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let onClickAction = $derived(config.onClickAction);
 
-	let justCopied = $state(false);
+
 	let canSelect = $derived(!readonly && !disabled && !isGallery);
 	let canDelete = $derived(!readonly && !disabled && !isGallery);
 	let slotted = $derived(config.slotted);
@@ -209,10 +209,7 @@
 		copyable: {
 			_enter() {},
 			click() {
-				copyTextToClipboard(
-					attachmentCopyText(localvalue),
-					(copied: boolean) => (justCopied = copied)
-				);
+				copyAndTransition(() => cellState, attachmentCopyText(localvalue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -221,6 +218,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {}
 		},
@@ -287,7 +285,6 @@
 	state={cellState}
 	bind:root={anchor}
 	multirow
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

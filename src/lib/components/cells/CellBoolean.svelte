@@ -2,7 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import Switch from '../UI/elements/Switch.svelte';
 	import Checkbox from '../UI/elements/Checkbox.svelte';
 	import './CellCommon.css';
@@ -42,7 +42,7 @@
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 
-	let justCopied = $state(false);
+
 	let error = $derived(optionError);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(localValue !== value);
@@ -108,7 +108,7 @@
 				localValue = value;
 			},
 			click() {
-				copyTextToClipboard(String(!!value), (copied) => (justCopied = copied));
+				copyAndTransition(() => cellState, String(!!value));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -117,6 +117,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {
 				localValue = value;
@@ -192,7 +193,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

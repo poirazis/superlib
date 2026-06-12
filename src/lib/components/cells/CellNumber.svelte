@@ -2,6 +2,7 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import CellNumberStepper from './CellNumberStepper.svelte';
 	import './CellCommon.css';
 
@@ -26,8 +27,6 @@
 
 	let errors = $state([]);
 	let editor = $state();
-	let justCopied = $state(false);
-
 	let config = $derived(cellOptions ?? {});
 	let initialState = $derived(config.initialState || 'view');
 	let readonly = $derived(config.readonly);
@@ -150,17 +149,7 @@
 		},
 		copyable: {
 			click() {
-				navigator.clipboard
-					.writeText(formattedValue || String(value ?? ''))
-					.then(() => {
-						justCopied = true;
-						setTimeout(() => {
-							justCopied = false;
-						}, 400);
-					})
-					.catch((err) => {
-						console.error('Failed to copy to clipboard:', err);
-					});
+				copyAndTransition(() => csm, formattedValue || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -169,6 +158,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		readonly: {
 			_enter() {
 				const num = Number(value);
@@ -380,7 +370,6 @@
 	isDirty={isDirty && showDirty}
 	{clearable}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

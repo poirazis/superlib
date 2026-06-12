@@ -3,7 +3,7 @@
 	import fsm from 'svelte-fsm';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import PickerPopover from './PickerPopover.svelte';
 	import { ICON_CATEGORIES, ICONS_BY_CATEGORY } from './phosphorIcons';
 
@@ -30,7 +30,7 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let showCategories = $derived(config.showCategories);
 
-	let justCopied = $state(false);
+
 	let inEdit = $derived($cellState === 'editing');
 	let tableCell = $derived(config.role === 'cell' || config.role === 'tableCell');
 	let error = $derived(optionError);
@@ -136,7 +136,7 @@
 				open = false;
 			},
 			click() {
-				copyTextToClipboard(String(value ?? ''), (copied) => (justCopied = copied));
+				copyAndTransition(() => cellState, String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -145,6 +145,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {
 				open = false;
@@ -217,7 +218,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

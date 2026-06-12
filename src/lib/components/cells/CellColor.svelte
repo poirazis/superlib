@@ -2,7 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import PickerPopover from './PickerPopover.svelte';
 
 	const dispatch = createEventDispatcher();
@@ -34,7 +34,7 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let allowCustom = $derived(config.allowCustom !== false);
 
-	let justCopied = $state(false);
+
 	let circle = $derived(config.swatch === 'circle');
 	let customColors = $derived(config.customColors || []);
 	let showTheme = $derived(config.themeColors !== false);
@@ -241,7 +241,7 @@
 				open = false;
 			},
 			click() {
-				copyTextToClipboard(String(value ?? ''), (copied) => (justCopied = copied));
+				copyAndTransition(() => cellState, String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -250,6 +250,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => cellState),
 		disabled: {
 			_enter() {
 				open = false;
@@ -327,7 +328,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

@@ -3,7 +3,7 @@
 	import fsm from 'svelte-fsm';
 	import { InputMask, Masked, MaskedPattern, MaskedRegExp, createMask } from 'imask';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	if (MaskedPattern && Masked.overloads) {
 		if (!Masked.overloads.find((o) => o.mask === MaskedPattern)) {
@@ -47,8 +47,6 @@
 	let debounceDelay = $derived(config.debounce);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-
-	let justCopied = $state(false);
 
 	function createMaskInstance(maskPattern) {
 		if (!maskPattern) return null;
@@ -158,7 +156,7 @@
 				localValue = value;
 			},
 			click() {
-				copyTextToClipboard(displayValue || String(value ?? ''), (copied) => (justCopied = copied));
+				copyAndTransition(() => csm, displayValue || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -167,6 +165,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				localValue = value;
@@ -385,7 +384,6 @@
 	isDirty={isDirty && showDirty}
 	{clearable}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

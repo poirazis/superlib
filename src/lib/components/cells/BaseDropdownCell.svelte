@@ -5,6 +5,7 @@
 	import { tooltip } from '../../actions/tooltip';
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	const { API, fetchData, QueryUtils } = getContext('sdk');
 
@@ -15,12 +16,20 @@
 		icon?: string;
 	}
 
-	let { id, cellOptions, fieldSchema, value, autofocus = false } = $props();
+	let {
+		id,
+		cellOptions,
+		fieldSchema,
+		value,
+		multi: multiProp = false,
+		autofocus = false
+	} = $props();
 
 	const dispatch = createEventDispatcher();
 
 	let fetch = $state();
 
+	let multi = $derived(fieldSchema?.type === 'array' ? true : multiProp);
 	let inputSelect = $derived(cellOptions?.controlType === 'inputSelect');
 	let disabled = $derived(cellOptions?.disabled);
 	let readonly = $derived(cellOptions?.readonly);
@@ -29,6 +38,7 @@
 	let error = $derived(cellOptions?.error);
 	let icon = $derived(cellOptions?.icon);
 	let filter = $derived(cellOptions?.filter);
+	let optionsViewMode = $derived(cellOptions?.optionsViewMode ?? 'text');
 
 	let _message = $state<string | null>(null);
 
@@ -65,19 +75,54 @@
 	let editor = $state<HTMLInputElement | null>(null);
 
 	let open = $state(false);
-	let localValue = $derived<Option | null>(
-		inputSelect
-			? {
-					value: options?.find((option) => option.value === value)?.value ?? value,
-					label: options?.find((option) => option.value === value)?.label ?? value
-				}
-			: {
-					value: options?.find((option) => option.value === value)?.value,
-					label: options?.find((option) => option.value === value)?.label
-				}
-	);
+	let localValue = $state<Option[]>([]);
+
+	let isEmpty = $derived(localValue?.length < 1);
+	let pills = $derived(optionsViewMode === 'pills');
+	let bullets = $derived(optionsViewMode === 'bullets');
+	let plaintext = $derived(optionsViewMode === 'text');
 
 	let tabindex = $state(0);
+
+	function resolveToOptions(raw: any): Option[] {
+		const items = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [raw] : [];
+
+		return items
+			.map((item) => {
+				if (item && typeof item === 'object' && 'value' in item) {
+					const matched = options?.find((option) => option.value === item.value);
+					return (
+						matched ?? {
+							label: item.label ?? String(item.value),
+							value: item.value,
+							color: item.color
+						}
+					);
+				}
+
+				const matched = options?.find((option) => option.value === item);
+				if (matched) return matched;
+
+				if (inputSelect) {
+					return { label: String(item), value: item };
+				}
+
+				return null;
+			})
+			.filter((item): item is Option => item != null);
+	}
+
+	function getEmittedValue() {
+		if (multi) {
+			return localValue.map((option) => option.value);
+		}
+
+		return localValue[0]?.value ?? null;
+	}
+
+	function isSelected(option: Option) {
+		return localValue.some((selected) => selected.value === option.value);
+	}
 
 	let csm = fsm('view', {
 		'*': {
@@ -109,27 +154,41 @@
 				}, 0);
 			},
 			_exit: () => {
-				dispatch('change', localValue?.value);
+				dispatch('change', getEmittedValue());
 				open = false;
 			},
 			debounce() {
-				localValue = {
-					value: editor?.value,
-					label: editor?.value
-				};
+				localValue = [
+					{
+						value: editor?.value,
+						label: editor?.value
+					}
+				];
 			},
-			mousedown: (e) => {
-				e.preventDefault();
-				e.stopPropagation();
+			click: (e) => {
 				open = !open;
 			},
 			selectOption: (newValue: string) => {
-				if (localValue?.value === newValue) {
-					localValue = null;
+				const option = options.find((item) => item.value === newValue);
+				if (!option) return;
+
+				const pos = localValue.findIndex((item) => item.value === newValue);
+
+				if (multi) {
+					if (pos > -1) {
+						localValue = localValue.filter((_, index) => index !== pos);
+					} else {
+						localValue = [...localValue, option];
+					}
 					return;
 				}
 
-				localValue = options.find((option) => option.value === newValue);
+				if (pos > -1) {
+					localValue = [];
+				} else {
+					localValue = [option];
+				}
+
 				open = false;
 				anchor?.blur();
 				return 'view';
@@ -144,17 +203,13 @@
 		},
 		copyable: {
 			click() {
-				navigator.clipboard
-					.writeText(value)
-					.then(() => {
-						// Optionally, you can provide feedback to the user here
-						console.log('Value copied to clipboard');
-					})
-					.catch((err) => {
-						console.error('Failed to copy to clipboard:', err);
-					});
+				const copyValue = Array.isArray(value)
+					? value.join(', ')
+					: value != null
+						? String(value)
+						: '';
 
-				return 'justCopied';
+				copyAndTransition(() => csm, copyValue);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -163,13 +218,13 @@
 				}
 			}
 		},
-		justCopied: {
-			_enter() {
-				setTimeout(() => {
-					csm.goTo('copyable');
-				}, 400);
-			}
-		}
+		justCopied: deferJustCopied(() => csm)
+	});
+
+	$effect(() => {
+		void value;
+		void options;
+		localValue = resolveToOptions(value);
 	});
 
 	$effect(() => {
@@ -185,7 +240,7 @@
 	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && value) {
+		} else if (readonly && copyable && !isEmpty) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
@@ -204,8 +259,9 @@
 		}
 	});
 
-	$inspect('Options List', options);
-	$inspect('Current Value', localValue);
+	$effect(() => {
+		console.log(localValue);
+	});
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
@@ -214,10 +270,29 @@
 <BaseCell {id} bind:anchor {csm} {role} {error} {icon} popupOpen={open}>
 	{#key $csm}
 		{#if $csm !== 'editing' || !inputSelect}
-			<span class="value" class:placeholder={!localValue?.value}>
+			<span class="value" class:placeholder={isEmpty}>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="value-content" use:tooltip on:mousedown={csm.mousedown}>
-					{_message || localValue?.label || cellOptions?.placeholder}
+				<div class="value-content" use:tooltip on:click={csm.click}>
+					{#key localValue}
+						{#if isEmpty}
+							{_message || cellOptions?.placeholder || 'Select...'}
+						{:else}
+							<div class="items" class:pills class:bullets>
+								{#if plaintext}
+									{#each localValue as val, idx (val.value)}
+										{val.label}{idx < localValue.length - 1 ? ', ' : ''}
+									{/each}
+								{:else}
+									{#each localValue as val (val.value)}
+										<div class="item" style:--option-color={val.color}>
+											<div class="loope"></div>
+											<span>{val.label}</span>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						{/if}
+					{/key}
 				</div>
 			</span>
 		{:else}
@@ -225,8 +300,8 @@
 				bind:this={editor}
 				class="editor"
 				{tabindex}
-				class:placeholder={!localValue?.value}
-				value={_message || localValue?.value}
+				class:placeholder={isEmpty}
+				value={_message || localValue[0]?.value}
 				placeholder={cellOptions?.placeholder}
 				style:text-align={cellOptions.align}
 				on:input={csm.debounce}
@@ -236,13 +311,13 @@
 		{/if}
 		{#if $csm === 'view' || $csm == 'editing'}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<i class="ph ph-caret-down control-icon" on:mousedown|self={csm.mousedown}></i>
+			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
 		{/if}
 	{/key}
 </BaseCell>
 
 <SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
-	{#snippet renderOption(option: Option, selected: boolean = option.value === localValue?.value)}
+	{#snippet renderOption(option: Option, selected: boolean = isSelected(option))}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
@@ -307,7 +382,7 @@
 		max-width: 100%;
 		flex: 1 1 auto;
 		display: flex;
-		align-items: center;
+		align-items: stretch;
 		height: 100%;
 		background: transparent;
 		color: inherit;
@@ -320,6 +395,10 @@
 		white-space: nowrap;
 	}
 
+	span.value:has(.items) {
+		white-space: normal;
+	}
+
 	.value-content {
 		min-width: 0;
 		flex: 1;
@@ -328,10 +407,70 @@
 		text-overflow: ellipsis;
 		overflow: hidden;
 		white-space: nowrap;
+		display: flex;
+		align-items: center;
+	}
+
+	.value-content:has(.items) {
+		white-space: normal;
+		display: flex;
 	}
 
 	.value.placeholder .value-content {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
+	}
+
+	.items {
+		flex: auto;
+		display: flex;
+		overflow: hidden;
+		align-items: stretch;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.item {
+		display: flex;
+		align-items: center;
+		overflow: hidden;
+		min-width: 0;
+		gap: 0.5rem;
+		padding: 0rem 0.5rem;
+	}
+
+	.item span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.item .loope {
+		display: none;
+	}
+
+	.items.pills .item {
+		background-color: var(--option-color, var(--spectrum-global-color-gray-100));
+		border: 1px solid var(--option-color, var(--spectrum-global-color-gray-200));
+		border-radius: 4px;
+		align-self: stretch;
+		padding: 0.25rem 0.5rem;
+		font-size: 12px;
+	}
+
+	.items.bullets .item {
+		padding: unset;
+	}
+
+	.items.bullets .item .loope {
+		display: block;
+	}
+
+	.loope {
+		width: 14px;
+		height: 14px;
+		border-radius: 2px;
+		background-color: var(--option-color, var(--spectrum-global-color-gray-300));
+		flex-shrink: 0;
 	}
 </style>

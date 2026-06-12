@@ -2,6 +2,7 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -10,7 +11,7 @@
 		id,
 		value,
 		cellOptions = {
-			role: 'formInput',
+			role: 'form',
 			initialState: 'view',
 			debounce: 250
 		},
@@ -53,7 +54,6 @@
 	let isDirty = $derived(value !== localValue);
 	let textarea = $derived(controlType === 'textarea');
 
-	let justCopied = $state(false);
 	let tabindex = $state(0);
 
 	// FSM created here — methods close over the derived/state values declared above
@@ -86,17 +86,7 @@
 		},
 		copyable: {
 			click() {
-				navigator.clipboard
-					.writeText(value)
-					.then(() => {
-						justCopied = true;
-						setTimeout(() => {
-							justCopied = false;
-						}, 400);
-					})
-					.catch((err) => {
-						console.error('Failed to copy to clipboard:', err);
-					});
+				copyAndTransition(() => csm, String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -105,6 +95,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				localValue = value;
@@ -224,7 +215,6 @@
 	isDirty={isDirty && showDirty}
 	{clearable}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

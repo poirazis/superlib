@@ -2,6 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	const dispatch = createEventDispatcher();
 
@@ -51,8 +52,6 @@
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(value !== localValue);
 	let interactive = $derived(!disabled && !readonly && ($csm === 'view' || $csm === 'editing'));
-
-	let justCopied = $state(false);
 
 	let fillPercent = $derived.by(() => {
 		const current = clampValue(localValue ?? lowerBound);
@@ -195,17 +194,7 @@
 		},
 		copyable: {
 			click() {
-				navigator.clipboard
-					.writeText(displayText)
-					.then(() => {
-						justCopied = true;
-						setTimeout(() => {
-							justCopied = false;
-						}, 400);
-					})
-					.catch((err) => {
-						console.error('Failed to copy to clipboard:', err);
-					});
+				copyAndTransition(() => csm, displayText);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -214,6 +203,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				localValue = value;
@@ -300,7 +290,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

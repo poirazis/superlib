@@ -7,7 +7,6 @@
 		isDirty?: boolean;
 		multirow?: boolean;
 		placeholder?: boolean; // applies the .placeholder visual class
-		justCopied?: boolean;
 		copyIcon?: 'always' | 'onhover' | string;
 		grabber?: boolean;
 		color?: string;
@@ -31,7 +30,6 @@
 		isDirty = false,
 		multirow = false,
 		placeholder = false,
-		justCopied = false,
 		copyIcon = 'always',
 		grabber = false,
 		popupOpen = undefined,
@@ -44,7 +42,7 @@
 
 	let cellTabindex = $derived(tabindexOverride ?? ($csm == 'view' || $csm == 'copyable' ? 0 : -1));
 
-	let actionIcon = $derived(justCopied ? 'ph ph-check' : 'ph ph-copy');
+	let actionIcon = $derived($csm === 'justCopied' ? 'ph ph-check' : 'ph ph-copy');
 	let copyIconOnHover = $derived(copyIcon === 'onhover');
 </script>
 
@@ -63,7 +61,6 @@
 	class:dropdown={popupOpen !== undefined}
 	class:multirow={multirow || role == 'inline'}
 	class:grabber
-	class:justCopied
 	class:icon-on-hover={$csm === 'copyable' && copyIconOnHover}
 	class:open-popup={popupOpen}
 	class:isDirty
@@ -95,7 +92,7 @@
 		></i>
 	{/if}
 
-	{#if $csm === 'copyable'}
+	{#if $csm === 'copyable' || $csm === 'justCopied'}
 		<i class={actionIcon + ' copy-icon'} aria-hidden="true"></i>
 	{/if}
 </div>
@@ -212,10 +209,10 @@
 		pointer-events: none;
 	}
 
-	.super-cell.copyable.justCopied {
+	.super-cell.justCopied {
 		border-color: rgb(from var(--spectrum-global-color-static-green-400) r g b / 0.75) !important;
 	}
-	.super-cell.copyable.justCopied .copy-icon {
+	.super-cell.justCopied .copy-icon {
 		color: var(--spectrum-global-color-green-700);
 		opacity: 1;
 	}

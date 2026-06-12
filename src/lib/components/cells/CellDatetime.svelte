@@ -3,6 +3,7 @@
 	import { DatePicker } from 'date-picker-svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
@@ -38,7 +39,7 @@
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let justCopied = $state(false);
+
 	let inEdit = $derived($csm === 'editing');
 	let error = $derived(optionError);
 	let isDirty = $derived(inEdit && selection);
@@ -290,18 +291,7 @@
 				selection = false;
 			},
 			click() {
-				const textToCopy = formattedValue || String(value ?? '');
-				navigator.clipboard
-					.writeText(textToCopy)
-					.then(() => {
-						justCopied = true;
-						setTimeout(() => {
-							justCopied = false;
-						}, 400);
-					})
-					.catch((err) => {
-						console.error('Failed to copy to clipboard:', err);
-					});
+				copyAndTransition(() => csm, formattedValue || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -310,6 +300,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				open = false;
@@ -555,7 +546,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}

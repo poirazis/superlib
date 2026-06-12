@@ -3,7 +3,7 @@
 	import { DatePicker } from 'date-picker-svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyTextToClipboard } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
@@ -32,7 +32,7 @@
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 
-	let justCopied = $state(false);
+
 	let fromTime = $derived(currentShowTime && localValue?.fromTime ? localValue.fromTime : '00:00');
 	let toTime = $derived(currentShowTime && localValue?.toTime ? localValue.toTime : '00:00');
 	let fromDate = $derived(localValue?.from ? new Date(localValue.from) : new Date());
@@ -228,7 +228,7 @@
 				open = false;
 			},
 			click() {
-				copyTextToClipboard(rangeDisplay || '', (copied) => (justCopied = copied));
+				copyAndTransition(() => csm, rangeDisplay || '');
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -237,6 +237,7 @@
 				}
 			}
 		},
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				open = false;
@@ -381,7 +382,6 @@
 	isDirty={isDirty && showDirty}
 	clearable={false}
 	{error}
-	{justCopied}
 	{copyIcon}
 	{color}
 	{background}
