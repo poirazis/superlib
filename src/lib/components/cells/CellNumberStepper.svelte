@@ -16,7 +16,7 @@
 		flex-direction: row;
 		align-items: stretch;
 		gap: 0.25rem;
-		padding: 0.25rem 0;
+		padding: 0.25rem 0.5rem;
 	}
 
 	.controls i {

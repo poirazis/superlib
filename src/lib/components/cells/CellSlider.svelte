@@ -50,9 +50,7 @@
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(value !== localValue);
-	let interactive = $derived(
-		!disabled && !readonly && ($csm === 'view' || $csm === 'editing')
-	);
+	let interactive = $derived(!disabled && !readonly && ($csm === 'view' || $csm === 'editing'));
 
 	let justCopied = $state(false);
 
@@ -289,6 +287,10 @@
 			csm.goTo('view');
 		}
 	});
+
+	$effect(() => {
+		console.log('Local Value changed:', localValue);
+	});
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
@@ -372,6 +374,7 @@
 	}
 
 	.slider-fill-bg {
+		opacity: 0.5;
 		position: absolute;
 		left: 0;
 		top: 0;
