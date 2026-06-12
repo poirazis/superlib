@@ -50,14 +50,6 @@
 
 	let justCopied = $state(false);
 
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
-
 	function createMaskInstance(maskPattern) {
 		if (!maskPattern) return null;
 		try {
@@ -113,11 +105,11 @@
 		isComplete = tempMask.isComplete;
 	}
 
-	let placeholder = $derived(config.placeholder || mask || '');
+	let placeholder = $derived(mask || config.placeholder || field || '');
 	let error = $derived(optionError || errors.length > 0 || !!(localValue && mask && !isComplete));
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(originalValue !== localValue);
-	let inEdit = $derived($cellState === 'editing');
+	let inEdit = $derived($csm === 'editing');
 	let displayValue = $derived(inEdit ? localValue : applyMask(value));
 	let clearable = $derived(
 		config.clearIcon !== false &&
@@ -127,7 +119,7 @@
 			localValue !== ''
 	);
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -275,8 +267,8 @@
 	});
 
 	export const cellApi = {
-		focus: () => cellState.focus(),
-		reset: () => cellState.reset(),
+		focus: () => csm.focus(),
+		reset: () => csm.reset(),
 		isDirty: () => isDirty,
 		getValue: () => localValue,
 		setError: (err) => {
@@ -354,13 +346,9 @@
 	}
 
 	$effect(() => {
-		cellState.reset(value);
-	});
-
-	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
+				csm.focus();
 			}, 50);
 		}
 
@@ -376,13 +364,13 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else if (!inEdit) {
-			cellState.goTo('view');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -391,8 +379,8 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
-	role={baseRole}
-	state={cellState}
+	role={config.role}
+	{csm}
 	{icon}
 	isDirty={isDirty && showDirty}
 	{clearable}
@@ -402,39 +390,18 @@
 	{color}
 	{background}
 >
-	{#key $cellState}
-		{#if icon}
-			<i class={icon + ' field-icon'} class:with-error={error}></i>
-		{/if}
-
-		{#if inEdit}
-			<input
-				bind:this={inputElement}
-				class="editor"
-				{placeholder}
-				disabled={false}
-				style:color={!isComplete ? 'var(--spectrum-global-color-gray-700)' : color}
-				style:text-align={config.align == 'center'
-					? 'center'
-					: config.align == 'flex-end' || config.align == 'right'
-						? 'right'
-						: 'left'}
-				on:focusout={cellState.focusout}
-				on:keydown={cellState.keydown}
-				use:initIMask={mask}
-			/>
-		{:else}
-			<input
-				class="editor"
-				class:placeholder={!value}
-				disabled={true}
-				value={displayValue || placeholder}
-				style:text-align={config.align == 'center'
-					? 'center'
-					: config.align == 'flex-end' || config.align == 'right'
-						? 'right'
-						: 'left'}
-			/>
-		{/if}
+	{#key mask}
+		<input
+			bind:this={inputElement}
+			class="editor"
+			{placeholder}
+			disabled={$csm != 'editing'}
+			value={displayValue}
+			style:color={!isComplete ? 'var(--spectrum-global-color-gray-700)' : color}
+			style:text-align={config.align}
+			on:focusout={csm.focusout}
+			on:keydown={csm.keydown}
+			use:initIMask={mask}
+		/>
 	{/key}
 </BaseCell>
