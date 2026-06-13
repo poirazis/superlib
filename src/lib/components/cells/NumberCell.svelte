@@ -5,7 +5,6 @@
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import { tooltip } from '../../actions/tooltip';
 	import CellNumberStepper from './CellNumberStepper.svelte';
-	import './CellCommon.css';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');

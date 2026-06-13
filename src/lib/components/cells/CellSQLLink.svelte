@@ -1,278 +1,374 @@
-<script>
-	import { createEventDispatcher, getContext } from 'svelte';
+<script lang="ts">
+	import { createEventDispatcher, getContext, untrack } from 'svelte';
 	import fsm from 'svelte-fsm';
+	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import CellSQLLinkPicker from './CellSQLLinkPicker.svelte';
 	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
-	import './CellCommon.css';
+	import { tooltip } from '../../actions/tooltip';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+
+	interface SQLLinkItem {
+		primaryDisplay: string;
+		[key: string]: unknown;
+	}
 
 	const dispatch = createEventDispatcher();
 	const { API } = getContext('sdk');
 
 	let {
+		id,
 		value,
 		fieldSchema,
-		cellOptions,
+		cellOptions = {},
 		filter = [],
 		limit = 100,
 		multi = false,
 		ownId: ownIdProp,
+		autofocus = false,
 		children
 	} = $props();
 
-	// svelte-ignore state_referenced_locally
-	let originalValue = $state(JSON.stringify(value));
-	let anchor = $state();
-	let popup = $state();
-	let pickerApi = $state();
+	let anchor = $state<HTMLElement | null>(null);
+	let picker = $state<HTMLElement | null>(null);
+	let pickerApi = $state<{ focus?: () => void }>();
+	let open = $state(false);
+	let localValue = $state<SQLLinkItem[]>([]);
+	let originalValue = $state('[]');
+	let primaryDisplayField = $state<string | undefined>();
 	let isLoading = $state(false);
-	let localValue = $state([]);
+	let enrichGeneration = 0;
 
 	let config = $derived(cellOptions ?? {});
 	let relatedField = $derived(fieldSchema?.relatedField || 'id');
 	let relatedTableId = $derived(fieldSchema?.tableId);
-	let pills = $derived(config.relViewMode == 'pills');
+	let pills = $derived(config.relViewMode === 'pills');
+	let plaintext = $derived(config.relViewMode === 'text' || !config.relViewMode);
 	let ownId = $derived(ownIdProp || config?.ownId);
-	let inEdit = $derived($cellState == 'Editing');
-	let isDirty = $derived(inEdit && originalValue != JSON.stringify(localValue));
-	let inline = $derived(config.role == 'inline');
 	let placeholder = $derived(config.placeholder || '');
-	let readonly = $derived(config.readonly || config.disabled);
+	let disabled = $derived(config.disabled);
+	let readonly = $derived(config.readonly);
+	let copyable = $derived(config.copyable);
+	let copyIcon = $derived(config.copyIcon ?? 'always');
+	let role = $derived(config.role);
+	let error = $derived(config.error);
+	let icon = $derived(config.icon);
+	let showDirty = $derived(config.showDirty);
+	let writable = $derived(!disabled && !readonly);
+	let isEmpty = $derived((localValue?.length ?? 0) < 1);
+	let tabindex = $state(0);
 
-	const editorState = fsm('Closed', {
-		Open: {
-			close() {
-				return 'Closed';
-			},
-			toggle() {
-				return 'Closed';
+	const getEmittedLabel = () => {
+		if (!localValue.length) return null;
+		return localValue.map((item) => item.primaryDisplay).join(', ');
+	};
+
+	const parseRow = (row: Record<string, unknown>, displayField?: string): SQLLinkItem | null => {
+		const rowId = row[relatedField];
+		if (rowId == null) return null;
+
+		const display =
+			row.primaryDisplay != null
+				? String(row.primaryDisplay)
+				: displayField && row[displayField] != null
+					? String(row[displayField])
+					: String(row.name ?? rowId);
+
+		return {
+			...row,
+			[relatedField]: rowId,
+			primaryDisplay: display
+		};
+	};
+
+	const toLocalValue = (raw: unknown): SQLLinkItem[] => {
+		if (raw == null || raw === '') return [];
+
+		if (multi) {
+			return Array.isArray(raw)
+				? raw
+						.map((item) =>
+							typeof item === 'object' && item !== null
+								? parseRow(item as Record<string, unknown>, primaryDisplayField)
+								: null
+						)
+						.filter((item): item is SQLLinkItem => !!item)
+				: [];
+		}
+
+		if (typeof raw === 'object' && !Array.isArray(raw)) {
+			const item = parseRow(raw as Record<string, unknown>, primaryDisplayField);
+			return item ? [item] : [];
+		}
+
+		return [];
+	};
+
+	const enrichValue = async (raw: unknown, generation: number) => {
+		if (!API || !relatedTableId || !writable) return;
+
+		if (multi && Array.isArray(raw)) {
+			const ids = raw.filter((item) => typeof item !== 'object');
+			if (!ids.length) return;
+
+			const existingIds = new Set(
+				localValue.map((item) => item[relatedField]).filter((id) => id != null)
+			);
+			const missingIds = ids.filter((id) => !existingIds.has(id));
+			if (!missingIds.length) return;
+
+			isLoading = true;
+			try {
+				const definition = await API.fetchTableDefinition(relatedTableId);
+				if (generation !== enrichGeneration) return;
+
+				const displayField =
+					primaryDisplayField || definition?.primaryDisplay || fieldSchema?.primaryDisplay;
+				if (displayField) primaryDisplayField = displayField;
+
+				const rows = await Promise.all(
+					missingIds.map((id) => API.fetchRow(relatedTableId, id, true))
+				);
+				if (generation !== enrichGeneration) return;
+
+				const enriched = rows
+					.map((row) => parseRow(row as Record<string, unknown>, displayField))
+					.filter((item): item is SQLLinkItem => !!item);
+
+				localValue = [...localValue, ...enriched];
+				dispatch('enrich', { rows: enriched });
+			} catch (err) {
+				console.error('Error enriching SQL relationship rows', err);
+			} finally {
+				if (generation === enrichGeneration) isLoading = false;
 			}
-		},
-		Closed: {
-			open() {
-				return 'Open';
-			},
-			toggle() {
-				return 'Open';
+			return;
+		}
+
+		if (!multi && raw != null && !Array.isArray(raw) && typeof raw !== 'object') {
+			const existing = localValue.find((item) => item[relatedField] === raw);
+			if (existing) return;
+
+			isLoading = true;
+			try {
+				const definition = await API.fetchTableDefinition(relatedTableId);
+				if (generation !== enrichGeneration) return;
+
+				const displayField =
+					primaryDisplayField || definition?.primaryDisplay || fieldSchema?.primaryDisplay;
+				if (displayField) primaryDisplayField = displayField;
+
+				const row = await API.fetchRow(relatedTableId, raw, true);
+				if (generation !== enrichGeneration) return;
+
+				const enriched = parseRow(row as Record<string, unknown>, displayField);
+				localValue = enriched ? [enriched] : [];
+				if (enriched) dispatch('enrich', { rows: [enriched] });
+			} catch (err) {
+				console.error('Error enriching SQL relationship row', err);
+				if (generation === enrichGeneration) localValue = [];
+			} finally {
+				if (generation === enrichGeneration) isLoading = false;
 			}
 		}
-	});
+	};
 
-	// svelte-ignore state_referenced_locally
-	export const cellState = fsm(cellOptions?.initialState ?? 'View', {
+	const csm = fsm('view', {
 		'*': {
-			goTo(state) {
-				return state;
-			},
-			reset() {
-				localValue = undefined;
+			goTo: (state: string) => state
+		},
+		view: {
+			focus: () => {
+				if (!readonly && !disabled) return 'editing';
 			}
 		},
-		View: {
-			_enter() {},
-			toggle() {},
-			focus() {
-				if (!config.readonly && !config.disabled) return 'Editing';
-			}
-		},
-		Editing: {
-			_enter() {
+		editing: {
+			_enter: () => {
 				originalValue = JSON.stringify(localValue);
-				editorState.open();
+				open = true;
 				dispatch('enteredit');
+				setTimeout(() => pickerApi?.focus?.(), 0);
 			},
-			_exit() {
-				editorState.close();
+			_exit: () => {
+				open = false;
 				dispatch('exitedit');
-			},
-			toggle() {
-				editorState.toggle();
-			},
-			focusout(e) {
-				if (popup?.contains(e?.relatedTarget)) return;
-				this.submit();
-			},
-			popupfocusout(e) {
-				if (anchor != e?.relatedTarget) {
-					this.submit();
+				if (isDirty) {
+					dispatch('change', localValue);
+					dispatch('labelChange', getEmittedLabel());
 				}
 			},
-			clear() {
-				localValue = [];
+			click: () => {
+				open = !open;
 			},
-			submit() {
-				if (isDirty) dispatch('change', localValue);
-				return 'View';
+			keydown: (e: KeyboardEvent) => {
+				if (e.key === ' ' || e.keyCode === 32) {
+					e.preventDefault();
+					open = !open;
+				} else if (e.key === 'Escape') {
+					if (open) {
+						open = false;
+					} else {
+						localValue = JSON.parse(originalValue);
+						anchor?.blur();
+						return 'view';
+					}
+				} else if (e.key === 'Tab' && open) {
+					anchor?.blur();
+					return 'view';
+				} else if (open) {
+					pickerApi?.focus?.();
+				}
 			},
-			cancel() {
-				anchor?.blur();
-				localValue = JSON.parse(originalValue);
-				return 'View';
+			focusout: (e: FocusEvent) => {
+				if (picker?.contains(e.relatedTarget as Node)) return;
+				return 'view';
+			},
+			popupfocusout: (e: FocusEvent) => {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return 'view';
+			},
+			selectChange: (nextValue: SQLLinkItem[]) => {
+				localValue = nextValue;
+
+				if (!multi) {
+					open = false;
+					anchor?.blur();
+					return 'view';
+				}
 			}
-		}
+		},
+		readonly: {},
+		disabled: {},
+		copyable: {
+			click() {
+				copyAndTransition(() => csm, getEmittedLabel() ?? '');
+			},
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
+			}
+		},
+		justCopied: deferJustCopied(() => csm)
 	});
 
-	const enrichValue = (x) => {
-		if (Array.isArray(x) && multi) {
-			const existingIds = localValue ? localValue.map((v) => v[relatedField]) : [];
-			const missingIds = x.filter((id) => !existingIds.includes(id));
-			if (missingIds.length > 0) {
-				isLoading = true;
-				API.fetchTableDefinition(relatedTableId).then((def) => {
-					fieldSchema.primaryDisplay = def.primaryDisplay;
-				});
+	let isDirty = $derived($csm === 'editing' && originalValue !== JSON.stringify(localValue));
 
-				Promise.all(missingIds.map((id) => API.fetchRow(relatedTableId, id, true)))
-					.then((rows) => {
-						const newEnriched = rows.map((row) => ({
-							...row,
-							primaryDisplay: fieldSchema.primaryDisplay
-								? row[fieldSchema.primaryDisplay]
-								: row.name || row.id
-						}));
-						localValue = [...(localValue || []), ...newEnriched];
-						dispatch('enrich', { rows: newEnriched });
-						isLoading = false;
-					})
-					.catch(() => {
-						isLoading = false;
-					});
-			}
-			return localValue || [];
-		} else if (x && !Array.isArray(x)) {
-			const existing = localValue && localValue.find((v) => v[relatedField] === x);
-			if (!existing) {
-				isLoading = true;
-				API.fetchTableDefinition(relatedTableId).then((def) => {
-					fieldSchema.primaryDisplay = def.primaryDisplay;
-				});
-
-				API.fetchRow(relatedTableId, x, true)
-					.then((row) => {
-						const enrichedRow = {
-							...row,
-							primaryDisplay: fieldSchema.primaryDisplay
-								? row[fieldSchema.primaryDisplay]
-								: row.name || row.id
-						};
-						localValue = [enrichedRow];
-						dispatch('enrich', { rows: [enrichedRow] });
-						isLoading = false;
-					})
-					.catch(() => {
-						localValue = [];
-						isLoading = false;
-					});
-			}
-			return localValue || [];
-		} else if (multi) {
-			return value && Array.isArray(value) ? value : [];
-		}
-		return value ? [value] : [];
+	const handlePickerChange = (e: CustomEvent<SQLLinkItem[]>) => {
+		csm.selectChange(e.detail);
 	};
 
 	$effect(() => {
-		localValue = enrichValue(value);
+		const raw = value;
+		const generation = ++enrichGeneration;
+
+		untrack(async () => {
+			localValue = toLocalValue(raw);
+			await enrichValue(raw, generation);
+		});
 	});
 
-	const handleKeyboard = (e) => {
-		if (e.key == 'Escape') {
-			if ($editorState == 'Open') {
-				editorState.close();
-			} else {
-				cellState.focusout(e);
-			}
-		} else if (e.keyCode == 32 && $cellState == 'Editing') {
-			editorState.toggle();
-		} else if (e.key == 'Tab' && $editorState == 'Open') {
-			cellState.focusout(e);
-		} else if ($editorState == 'Open') {
-			pickerApi?.focus();
+	$effect(() => {
+		if (disabled) {
+			csm.goTo('disabled');
+		} else if (readonly && copyable && !isEmpty) {
+			csm.goTo('copyable');
+		} else if (readonly) {
+			csm.goTo('readonly');
+		} else {
+			csm.goTo('view');
 		}
-	};
 
-	const handleChange = (e) => {
-		localValue = e.detail;
+		tabindex = readonly || disabled ? -1 : 0;
+	});
 
-		if (!multi) {
-			editorState.close();
-			anchor?.focus();
+	$effect(() => {
+		if (autofocus) {
+			setTimeout(() => csm.focus(), 50);
 		}
-	};
+	});
 </script>
 
+<!-- svelte-ignore a11y_interactive_supports_focus -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<div
-	class="superCell has-popup"
-	tabindex={config?.disabled ? -1 : 0}
-	bind:this={anchor}
-	class:isDirty={isDirty && config.showDirty}
-	class:inEdit
-	class:inline={inline}
-	class:form={config.role == 'form'}
-	class:disabled={config.disabled}
-	class:readonly
-	class:open-popup={$editorState == 'Open'}
-	class:error={config.error}
-	style:color={config.color}
-	style:background={config.background}
-	on:focusin={cellState.focus}
-	on:keydown|self={handleKeyboard}
-	on:mousedown={cellState.toggle}
-	on:focusout={cellState.focusout}
+<BaseCell
+	{id}
+	bind:anchor
+	{csm}
+	{role}
+	{error}
+	{icon}
+	isDirty={isDirty && showDirty}
+	popupOpen={open}
+	{copyIcon}
+	{tabindex}
 >
-	{#if !isLoading}
-		{#if config?.icon}
-			<i class={config.icon + ' field-icon'}></i>
-		{/if}
-
-		<div class="value" class:placeholder={(localValue?.length ?? 0) < 1}>
-			{#key localValue}
-				{#if (localValue?.length ?? 0) < 1}
-					<span> {placeholder} </span>
-				{:else if pills}
-					<div class="items" class:pills class:withCount={localValue.length > 5} class:inEdit>
-						{#each localValue as val, idx (idx)}
-							{#if idx < 5}
-								<div class="item">
-									<span>{val.primaryDisplay}</span>
-								</div>
-							{/if}
-						{/each}
-						{#if localValue.length > 5}
-							<span class="count">
-								(+ {localValue.length - 5})
-							</span>
-						{/if}
-					</div>
+	{#key $csm}
+		<span class="value" class:placeholder={isEmpty}>
+			<div class="value-content" use:tooltip>
+				{#if isLoading}
+					Loading...
 				{:else}
-					<span>
-						{#if config.role == 'form' && localValue.length > 1}
-							({localValue.length})
+					{#key localValue}
+						{#if isEmpty}
+							{placeholder || 'Select...'}
+						{:else if plaintext}
+							{#if role === 'form' && localValue.length > 1}
+								({localValue.length})
+							{/if}
+							{localValue.map((item) => item.primaryDisplay).join(', ')}
+						{:else if pills}
+							<div class="items pills" class:withCount={localValue.length > 5}>
+								{#each localValue as val, idx (idx)}
+									{#if idx < 5}
+										<div class="item">
+											<span>{val.primaryDisplay}</span>
+										</div>
+									{/if}
+								{/each}
+								{#if localValue.length > 5}
+									<span class="count">(+ {localValue.length - 5})</span>
+								{/if}
+							</div>
+						{:else}
+							{localValue.map((item) => item.primaryDisplay).join(', ')}
 						{/if}
-						{localValue.map((v) => v.primaryDisplay).join(', ')}
-					</span>
+					{/key}
 				{/if}
-			{/key}
-		</div>
-		{#if !readonly && (config.role == 'form' || inEdit)}
-			<i class="ph ph-caret-down control-icon"></i>
-		{/if}
-	{/if}
-</div>
+			</div>
+		</span>
 
-{#if inEdit}
-	<SuperPopover
-		{anchor}
-		useAnchorWidth={true}
-		minWidth={config.pickerWidth || undefined}
-		align="left"
-		open={$editorState == 'Open'}
-	>
-		{#snippet children()}
+		{#if !readonly && ($csm === 'view' || $csm === 'editing')}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
+		{/if}
+	{/key}
+</BaseCell>
+
+<SuperPopover
+	{anchor}
+	{open}
+	useAnchorWidth={true}
+	minWidth={config.pickerWidth || undefined}
+	align="left"
+	dismissible={false}
+>
+	{#if $csm === 'editing'}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="picker-container"
+			bind:this={picker}
+			on:keydown={(e) => {
+				if (e.key === 'Escape' || e.key === 'Tab') {
+					anchor?.focus();
+					open = false;
+					e.preventDefault();
+				}
+			}}
+		>
 			{#if fieldSchema?.recursiveTable}
 				<CellLinkPickerTree
 					{fieldSchema}
@@ -283,7 +379,7 @@
 					value={localValue}
 					{ownId}
 					{multi}
-					on:change={handleChange}
+					on:change={handlePickerChange}
 				/>
 			{:else}
 				<CellSQLLinkPicker
@@ -292,12 +388,104 @@
 					{multi}
 					value={localValue}
 					bind:api={pickerApi}
-					on:change={handleChange}
-					on:focusout={cellState.popupfocusout}
+					on:change={handlePickerChange}
+					on:focusout={csm.popupfocusout}
 				>
 					{@render children?.()}
 				</CellSQLLinkPicker>
 			{/if}
-		{/snippet}
-	</SuperPopover>
-{/if}
+		</div>
+	{/if}
+</SuperPopover>
+
+<style>
+	span.value {
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: stretch;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		cursor: inherit;
+		padding: 0.25rem 0.75rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	span.value:has(.items) {
+		white-space: normal;
+	}
+
+	.value-content {
+		min-width: 0;
+		flex: 1;
+		font-style: inherit;
+		font-size: 13px;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+		display: flex;
+		align-items: center;
+	}
+
+	.value-content:has(.items) {
+		white-space: normal;
+		display: flex;
+	}
+
+	.value.placeholder .value-content {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
+	}
+
+	.items {
+		flex: auto;
+		display: flex;
+		overflow: hidden;
+		align-items: stretch;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.item {
+		display: flex;
+		align-items: center;
+		overflow: hidden;
+		min-width: 0;
+		gap: 0.35rem;
+		padding: 0rem 0.5rem;
+	}
+
+	.item span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.items.pills .item {
+		background-color: var(--spectrum-global-color-gray-100);
+		border: 1px solid var(--spectrum-global-color-gray-200);
+		border-radius: 4px;
+		align-self: stretch;
+		padding: 0.25rem 0.5rem;
+		font-size: 12px;
+	}
+
+	.count {
+		color: var(--spectrum-global-color-gray-600);
+		font-size: 12px;
+		align-self: center;
+	}
+
+	.picker-container {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+</style>
