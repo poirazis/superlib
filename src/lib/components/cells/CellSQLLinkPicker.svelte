@@ -1,7 +1,9 @@
 <script>
-	import { getContext, createEventDispatcher, tick, untrack } from 'svelte';
+	import { createEventDispatcher, tick } from 'svelte';
+	import { getContext } from 'svelte';
+	import DataProvider from '../DataProvider/DataProvider.svelte';
 
-	const { API, fetchData, QueryUtils } = getContext('sdk');
+	const { QueryUtils } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -26,64 +28,22 @@
 	let optionRefs = $state([]);
 	let currentLimit = $state(15);
 	let searchFilter = $state();
-	let searchExtensions = $state({});
+	let queryExtensions = $state({});
+	let fetch = $state();
 
 	let localValue = $derived(Array.isArray(value) ? value : []);
-	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
+	let dataSource = $derived(tableId ? { type: 'table', tableId } : undefined);
 
 	$effect(() => {
 		if (searchFilter) {
 			if (Array.isArray(searchFilter)) {
-				searchExtensions = { search: QueryUtils.buildQuery(searchFilter) };
+				queryExtensions = { search: QueryUtils.buildQuery(searchFilter) };
 			} else {
-				searchExtensions = { search: searchFilter };
+				queryExtensions = { search: searchFilter };
 			}
 		} else {
-			searchExtensions = {};
+			queryExtensions = {};
 		}
-	});
-
-	const extendQuery = (baseQuery, extensions) => {
-		if (!Object.keys(extensions).length) {
-			return baseQuery;
-		}
-		const extended = {
-			['$and']: {
-				conditions: [...(baseQuery ? [baseQuery] : []), ...Object.values(extensions || {})]
-			},
-			onEmptyFilter: 'none'
-		};
-		return (extended['$and']?.conditions?.length ?? 0) > 0 ? extended : {};
-	};
-
-	let query = $derived(extendQuery(defaultQuery, searchExtensions));
-
-	let fetch = $state();
-
-	$effect(() => {
-		if (!tableId) {
-			fetch = undefined;
-			return;
-		}
-
-		untrack(() => {
-			fetch = fetchData({
-				API,
-				datasource: {
-					type: 'table',
-					tableId
-				},
-				options: {
-					query: defaultQuery,
-					limit: initLimit
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		if (!fetch) return;
-		fetch.update({ query, limit: currentLimit });
 	});
 
 	$effect(() => {
@@ -151,38 +111,6 @@
 		dispatch('change', nextValue);
 	};
 
-	const buildSearchQuery = (term) => {
-		if (!term) {
-			return defaultQuery;
-		}
-
-		if (relatedColumns && relatedColumns.length > 0) {
-			return extendQuery(defaultQuery, {
-				search: {
-					$or: {
-						conditions: relatedColumns.map((col) => ({
-							fuzzy: {
-								[col.name]: term
-							}
-						}))
-					}
-				}
-			});
-		}
-
-		return extendQuery(defaultQuery, {
-			search: QueryUtils.buildQuery([
-				{
-					field: primaryDisplay,
-					type: 'string',
-					operator: 'fuzzy',
-					value: term,
-					valueType: 'Value'
-				}
-			])
-		});
-	};
-
 	const handleSearch = (e) => {
 		filterTerm = e.target.value;
 		currentLimit = initLimit;
@@ -212,17 +140,11 @@
 		} else {
 			searchFilter = undefined;
 		}
-
-		fetch?.update({
-			query: buildSearchQuery(e.target.value),
-			limit: initLimit
-		});
 	};
 
 	const fetchMore = () => {
 		if ($fetch?.loading || !hasMoreData) return;
 		currentLimit += 100;
-		fetch?.update({ limit: currentLimit });
 	};
 
 	const handleScroll = (e) => {
@@ -268,6 +190,16 @@
 		}
 	};
 </script>
+
+<DataProvider
+	bare
+	bind:fetch
+	bind:queryExtensions
+	{dataSource}
+	{filter}
+	limit={currentLimit}
+	paginate={false}
+/>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->

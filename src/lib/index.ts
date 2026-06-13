@@ -10,3 +10,5 @@ export { default as SimpleButton } from './components/UI/elements/SimpleButton.s
 export { default as SuperLightbox } from './components/SuperLightbox/SuperLightbox.svelte';
 export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
 export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';
+export { default as DataProvider } from './components/DataProvider/DataProvider.svelte';
+export { extendQuery, sanitizeSchema } from './utils/dataProvider.ts';
