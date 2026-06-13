@@ -1,9 +1,9 @@
 <script>
-	import { createEventDispatcher, tick } from 'svelte';
+	import { createEventDispatcher, tick, untrack } from 'svelte';
 	import { getContext } from 'svelte';
-	import DataProvider from '../DataProvider/DataProvider.svelte';
+	import { fromStore } from 'svelte/store';
 
-	const { QueryUtils } = getContext('sdk');
+	const { API, fetchData, QueryUtils } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -28,32 +28,74 @@
 	let optionRefs = $state([]);
 	let currentLimit = $state(15);
 	let searchFilter = $state();
-	let queryExtensions = $state({});
-	let fetch = $state();
+	let searchExtensions = $state({});
 
 	let localValue = $derived(Array.isArray(value) ? value : []);
-	let dataSource = $derived(tableId ? { type: 'table', tableId } : undefined);
+	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
 
 	$effect(() => {
 		if (searchFilter) {
 			if (Array.isArray(searchFilter)) {
-				queryExtensions = { search: QueryUtils.buildQuery(searchFilter) };
+				searchExtensions = { search: QueryUtils.buildQuery(searchFilter) };
 			} else {
-				queryExtensions = { search: searchFilter };
+				searchExtensions = { search: searchFilter };
 			}
 		} else {
-			queryExtensions = {};
+			searchExtensions = {};
 		}
+	});
+
+	const extendQuery = (baseQuery, extensions) => {
+		if (!Object.keys(extensions).length) {
+			return baseQuery;
+		}
+		const extended = {
+			$and: {
+				conditions: [...(baseQuery ? [baseQuery] : []), ...Object.values(extensions || {})]
+			},
+			onEmptyFilter: 'none'
+		};
+		return (extended.$and?.conditions?.length ?? 0) > 0 ? extended : {};
+	};
+
+	let query = $derived(extendQuery(defaultQuery, searchExtensions));
+
+	let fetchHandle = $state();
+	$effect(() => {
+		if (!tableId) {
+			fetchHandle = undefined;
+			return;
+		}
+
+		untrack(() => {
+			fetchHandle = fetchData({
+				API,
+				datasource: {
+					type: 'table',
+					tableId
+				},
+				options: {
+					query: defaultQuery,
+					limit: initLimit
+				}
+			});
+		});
 	});
 
 	$effect(() => {
-		if ($fetch?.loaded) {
+		if (!fetchHandle) return;
+		fetchHandle.update({ query, limit: currentLimit });
+	});
+
+	$effect(() => {
+		console.log('fetchHandle', fetchHandle);
+		if (fetchHandle?.loaded) {
 			isInitialLoad = false;
-			hasMoreData = ($fetch.rows?.length ?? 0) >= currentLimit;
+			hasMoreData = (fetchHandle.rows?.length ?? 0) >= currentLimit;
 		}
 	});
 
-	let primaryDisplay = $derived($fetch?.definition?.primaryDisplay || 'id');
+	let primaryDisplay = $derived(fetchHandle?.definition?.primaryDisplay || 'id');
 	let gridTemplate = $derived(
 		relatedColumns
 			.map((col) => col.width || '1fr')
@@ -61,7 +103,7 @@
 			.join(' ')
 	);
 
-	let totalRows = $derived(localValue.length + ($fetch?.rows?.length || 0));
+	let totalRows = $derived(localValue.length + (fetchHandle?.rows?.length || 0));
 
 	$effect(() => {
 		focusIdx = Math.min(focusIdx, totalRows - 1);
@@ -111,6 +153,38 @@
 		dispatch('change', nextValue);
 	};
 
+	const buildSearchQuery = (term) => {
+		if (!term) {
+			return defaultQuery;
+		}
+
+		if (relatedColumns && relatedColumns.length > 0) {
+			return extendQuery(defaultQuery, {
+				search: {
+					$or: {
+						conditions: relatedColumns.map((col) => ({
+							fuzzy: {
+								[col.name]: term
+							}
+						}))
+					}
+				}
+			});
+		}
+
+		return extendQuery(defaultQuery, {
+			search: QueryUtils.buildQuery([
+				{
+					field: primaryDisplay,
+					type: 'string',
+					operator: 'fuzzy',
+					value: term,
+					valueType: 'Value'
+				}
+			])
+		});
+	};
+
 	const handleSearch = (e) => {
 		filterTerm = e.target.value;
 		currentLimit = initLimit;
@@ -140,11 +214,17 @@
 		} else {
 			searchFilter = undefined;
 		}
+
+		fetchHandle?.update({
+			query: buildSearchQuery(e.target.value),
+			limit: initLimit
+		});
 	};
 
 	const fetchMore = () => {
-		if ($fetch?.loading || !hasMoreData) return;
+		if (fetchHandle?.loading || !hasMoreData) return;
 		currentLimit += 100;
+		fetchHandle?.update({ limit: currentLimit });
 	};
 
 	const handleScroll = (e) => {
@@ -171,7 +251,7 @@
 			const row =
 				focusIdx < localValue.length
 					? localValue[focusIdx]
-					: $fetch.rows[focusIdx - localValue.length];
+					: fetchHandle.rows[focusIdx - localValue.length];
 			selectRow(row);
 		}
 		if (e.key == 'Tab' || e.key == 'Escape') dispatch('close');
@@ -191,16 +271,6 @@
 	};
 </script>
 
-<DataProvider
-	bare
-	bind:fetch
-	bind:queryExtensions
-	{dataSource}
-	{filter}
-	limit={currentLimit}
-	paginate={false}
-/>
-
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -208,7 +278,7 @@
 <div class="control">
 	<div class="searchControl">
 		<i
-			class={$fetch?.loading && isInitialLoad
+			class={fetchHandle?.loading && isInitialLoad
 				? 'ph ph-spinner spin'
 				: control?.value
 					? 'ri-filter-fill'
@@ -222,7 +292,7 @@
 			class="search"
 			class:placeholder={!filterTerm}
 			type="text"
-			placeholder={$fetch?.loading && !$fetch?.rows?.length && isInitialLoad
+			placeholder={fetchHandle?.loading && !fetchHandle?.rows?.length && isInitialLoad
 				? 'Loading...'
 				: 'Search'}
 			on:input={handleSearch}
@@ -270,9 +340,9 @@
 						</div>
 					{/each}
 
-					{#if $fetch && $fetch.loaded}
+					{#if fetchHandle && fetchHandle.loaded}
 						{#key localValue.length}
-							{#each $fetch.rows as row, idx (row[relatedField])}
+							{#each fetchHandle.rows as row, idx (row[relatedField])}
 								{#if !rowSelected(row)}
 									<div
 										class="data-row"
@@ -294,19 +364,19 @@
 						{/key}
 					{/if}
 
-					{#if $fetch?.loading}
+					{#if fetchHandle?.loading}
 						<div class="data-row loading">
 							<div class="data-cell" style="grid-column: 1 / -1;">
 								<i class="ph ph-spinner spin"></i> Loading more...
 							</div>
 						</div>
-					{:else if $fetch?.loading && !$fetch.loaded}
+					{:else if fetchHandle?.loading && !fetchHandle.loaded}
 						<div class="data-row loading">
 							<div class="data-cell" style="grid-column: 1 / -1;">
 								<i class="ph ph-spinner spin"></i> Loading...
 							</div>
 						</div>
-					{:else if !$fetch?.loading && $fetch?.loaded && !$fetch.rows?.length}
+					{:else if !fetchHandle?.loading && fetchHandle?.loaded && !fetchHandle.rows?.length}
 						<div class="data-row">
 							<div class="data-cell" style="grid-column: 1 / -1;">No Results Found</div>
 						</div>
@@ -324,7 +394,6 @@
 							on:mouseleave={() => (focusIdx = -1)}
 							on:mousedown|preventDefault|stopPropagation={() => selectRow(row)}
 						>
-							{@render children?.()}
 							<span>{row.primaryDisplay || row[primaryDisplay]}</span>
 							<i class="ri-check-line"></i>
 						</div>
@@ -332,40 +401,35 @@
 
 					{#if !tableId}
 						<div class="option">Configure a related table</div>
-					{:else if $fetch}
-						{#key localValue.length}
-							{#if $fetch.rows?.length || ($fetch.loading && !isInitialLoad)}
-								{#each $fetch.rows || [] as row, idx (row[relatedField])}
-									{#if !rowSelected(row)}
-										<div
-											class="option"
-											class:highlighted={focusIdx == idx + localValue.length}
-											bind:this={optionRefs[idx + localValue.length]}
-											on:mouseenter={() => (focusIdx = idx + localValue.length)}
-											on:mouseleave={() => (focusIdx = -1)}
-											on:mousedown|preventDefault={() => selectRow(row)}
-										>
-											{@render children?.()}
-											<span>{row.primaryDisplay || row[primaryDisplay]}</span>
-											<i class="ri-check-line"></i>
-										</div>
-									{/if}
-								{/each}
-								{#if $fetch.loading && $fetch.loaded}
-									<div class="option loading">
-										<i class="ph ph-spinner spin"></i>
-										Loading more...
-									</div>
-								{/if}
-							{:else if $fetch.loading}
-								<div class="option loading">
-									<i class="ph ph-spinner spin"></i>
-									Loading...
+					{:else if fetchHandle && fetchHandle.loaded}
+						{#each $fetchHandle?.rows || [] as row, idx (row[relatedField])}
+							{#if !rowSelected(row)}
+								<div
+									class="option"
+									class:highlighted={focusIdx == idx + localValue.length}
+									bind:this={optionRefs[idx + localValue.length]}
+									on:mouseenter={() => (focusIdx = idx + localValue.length)}
+									on:mouseleave={() => (focusIdx = -1)}
+									on:mousedown|preventDefault={() => selectRow(row)}
+								>
+									<span>{row.primaryDisplay || row[primaryDisplay]}</span>
+									<i class="ri-check-line"></i>
 								</div>
-							{:else}
-								<div class="option">No Results Found</div>
 							{/if}
-						{/key}
+						{/each}
+						{#if fetchHandle?.loading && fetchHandle.loaded}
+							<div class="option loading">
+								<i class="ph ph-spinner spin"></i>
+								Loading more...
+							</div>
+						{/if}
+					{:else if fetchHandle?.loading}
+						<div class="option loading">
+							<i class="ph ph-spinner spin"></i>
+							Loading...
+						</div>
+					{:else}
+						<div class="option">No Results Found</div>
 					{/if}
 				</div>
 			{/if}
