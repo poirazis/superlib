@@ -15,6 +15,7 @@
 
 	const dispatch = createEventDispatcher();
 	const { API } = getContext('sdk');
+	const EMPTY_FILTER = [];
 
 	let {
 		id,
@@ -41,7 +42,7 @@
 	let enrichGeneration = 0;
 
 	let config = $derived(cellOptions ?? {});
-	let resolvedFilter = $derived(filter ?? []);
+	let resolvedFilter = $derived(filter ?? EMPTY_FILTER);
 	let relatedField = $derived(fieldSchema?.relatedField || 'id');
 	let relatedTableId = $derived(fieldSchema?.tableId);
 	let pills = $derived(config.relViewMode === 'pills');

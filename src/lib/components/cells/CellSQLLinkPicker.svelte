@@ -1,5 +1,5 @@
 <script>
-	import { getContext, createEventDispatcher, tick } from 'svelte';
+	import { getContext, createEventDispatcher, tick, untrack } from 'svelte';
 
 	const { API, fetchData, QueryUtils } = getContext('sdk');
 	const dispatch = createEventDispatcher();
@@ -13,7 +13,7 @@
 		children
 	} = $props();
 
-	let tableId = $derived(fieldSchema.tableId);
+	let tableId = $derived(fieldSchema?.tableId);
 	let relatedField = $derived(fieldSchema?.relatedField || 'id');
 	let relatedColumns = $derived(fieldSchema?.relatedColumns || []);
 
@@ -24,8 +24,7 @@
 	let isInitialLoad = $state(true);
 	let hasMoreData = $state(true);
 	let optionRefs = $state([]);
-	// svelte-ignore state_referenced_locally
-	let currentLimit = $state(initLimit);
+	let currentLimit = $state(15);
 	let searchFilter = $state();
 	let searchExtensions = $state({});
 
@@ -59,34 +58,42 @@
 
 	let query = $derived(extendQuery(defaultQuery, searchExtensions));
 
-	let optionsFetch = $state();
+	let fetch = $state();
 
 	$effect(() => {
 		if (!tableId) {
-			optionsFetch = undefined;
+			fetch = undefined;
 			return;
 		}
 
-		optionsFetch = fetchData({
-			API,
-			datasource: {
-				type: 'table',
-				tableId
-			},
-			options: {
-				query,
-				limit: currentLimit
-			}
+		untrack(() => {
+			fetch = fetchData({
+				API,
+				datasource: {
+					type: 'table',
+					tableId
+				},
+				options: {
+					query: defaultQuery,
+					limit: initLimit
+				}
+			});
 		});
 	});
 
 	$effect(() => {
-		if ($optionsFetch?.loaded) {
+		if (!fetch) return;
+		fetch.update({ query, limit: currentLimit });
+	});
+
+	$effect(() => {
+		if ($fetch?.loaded) {
 			isInitialLoad = false;
+			hasMoreData = ($fetch.rows?.length ?? 0) >= currentLimit;
 		}
 	});
 
-	let primaryDisplay = $derived($optionsFetch?.definition?.primaryDisplay || 'id');
+	let primaryDisplay = $derived($fetch?.definition?.primaryDisplay || 'id');
 	let gridTemplate = $derived(
 		relatedColumns
 			.map((col) => col.width || '1fr')
@@ -94,13 +101,7 @@
 			.join(' ')
 	);
 
-	$effect(() => {
-		if ($optionsFetch?.loaded) {
-			hasMoreData = ($optionsFetch.rows?.length ?? 0) >= currentLimit;
-		}
-	});
-
-	let totalRows = $derived(localValue.length + ($optionsFetch?.rows?.length || 0));
+	let totalRows = $derived(localValue.length + ($fetch?.rows?.length || 0));
 
 	$effect(() => {
 		focusIdx = Math.min(focusIdx, totalRows - 1);
@@ -150,8 +151,42 @@
 		dispatch('change', nextValue);
 	};
 
+	const buildSearchQuery = (term) => {
+		if (!term) {
+			return defaultQuery;
+		}
+
+		if (relatedColumns && relatedColumns.length > 0) {
+			return extendQuery(defaultQuery, {
+				search: {
+					$or: {
+						conditions: relatedColumns.map((col) => ({
+							fuzzy: {
+								[col.name]: term
+							}
+						}))
+					}
+				}
+			});
+		}
+
+		return extendQuery(defaultQuery, {
+			search: QueryUtils.buildQuery([
+				{
+					field: primaryDisplay,
+					type: 'string',
+					operator: 'fuzzy',
+					value: term,
+					valueType: 'Value'
+				}
+			])
+		});
+	};
+
 	const handleSearch = (e) => {
 		filterTerm = e.target.value;
+		currentLimit = initLimit;
+
 		if (e.target.value) {
 			if (relatedColumns && relatedColumns.length > 0) {
 				searchFilter = {
@@ -177,12 +212,17 @@
 		} else {
 			searchFilter = undefined;
 		}
-		currentLimit = initLimit;
+
+		fetch?.update({
+			query: buildSearchQuery(e.target.value),
+			limit: initLimit
+		});
 	};
 
 	const fetchMore = () => {
-		if ($optionsFetch?.loading || !hasMoreData) return;
+		if ($fetch?.loading || !hasMoreData) return;
 		currentLimit += 100;
+		fetch?.update({ limit: currentLimit });
 	};
 
 	const handleScroll = (e) => {
@@ -209,7 +249,7 @@
 			const row =
 				focusIdx < localValue.length
 					? localValue[focusIdx]
-					: $optionsFetch.rows[focusIdx - localValue.length];
+					: $fetch.rows[focusIdx - localValue.length];
 			selectRow(row);
 		}
 		if (e.key == 'Tab' || e.key == 'Escape') dispatch('close');
@@ -236,7 +276,7 @@
 <div class="control">
 	<div class="searchControl">
 		<i
-			class={$optionsFetch?.loading && isInitialLoad
+			class={$fetch?.loading && isInitialLoad
 				? 'ph ph-spinner spin'
 				: control?.value
 					? 'ri-filter-fill'
@@ -250,7 +290,7 @@
 			class="search"
 			class:placeholder={!filterTerm}
 			type="text"
-			placeholder={$optionsFetch?.loading && !$optionsFetch?.rows?.length && isInitialLoad
+			placeholder={$fetch?.loading && !$fetch?.rows?.length && isInitialLoad
 				? 'Loading...'
 				: 'Search'}
 			on:input={handleSearch}
@@ -298,9 +338,9 @@
 						</div>
 					{/each}
 
-					{#if $optionsFetch && $optionsFetch.loaded}
+					{#if $fetch && $fetch.loaded}
 						{#key localValue.length}
-							{#each $optionsFetch.rows as row, idx (row[relatedField])}
+							{#each $fetch.rows as row, idx (row[relatedField])}
 								{#if !rowSelected(row)}
 									<div
 										class="data-row"
@@ -322,19 +362,19 @@
 						{/key}
 					{/if}
 
-					{#if $optionsFetch?.loading}
+					{#if $fetch?.loading}
 						<div class="data-row loading">
 							<div class="data-cell" style="grid-column: 1 / -1;">
 								<i class="ph ph-spinner spin"></i> Loading more...
 							</div>
 						</div>
-					{:else if $optionsFetch?.loading && !$optionsFetch.loaded}
+					{:else if $fetch?.loading && !$fetch.loaded}
 						<div class="data-row loading">
 							<div class="data-cell" style="grid-column: 1 / -1;">
 								<i class="ph ph-spinner spin"></i> Loading...
 							</div>
 						</div>
-					{:else if !$optionsFetch?.loading && $optionsFetch?.loaded && !$optionsFetch.rows?.length}
+					{:else if !$fetch?.loading && $fetch?.loaded && !$fetch.rows?.length}
 						<div class="data-row">
 							<div class="data-cell" style="grid-column: 1 / -1;">No Results Found</div>
 						</div>
@@ -360,38 +400,40 @@
 
 					{#if !tableId}
 						<div class="option">Configure a related table</div>
-					{:else if $optionsFetch?.loading && isInitialLoad}
-						<div class="option loading">
-							<i class="ph ph-spinner spin"></i>
-							Loading...
-						</div>
-					{:else if $optionsFetch?.loaded}
+					{:else if $fetch}
 						{#key localValue.length}
-							{#each $optionsFetch.rows || [] as row, idx (row[relatedField])}
-								{#if !rowSelected(row)}
-									<div
-										class="option"
-										class:highlighted={focusIdx == idx + localValue.length}
-										bind:this={optionRefs[idx + localValue.length]}
-										on:mouseenter={() => (focusIdx = idx + localValue.length)}
-										on:mouseleave={() => (focusIdx = -1)}
-										on:mousedown|preventDefault={() => selectRow(row)}
-									>
-										{@render children?.()}
-										<span>{row.primaryDisplay || row[primaryDisplay]}</span>
-										<i class="ri-check-line"></i>
+							{#if $fetch.rows?.length || ($fetch.loading && !isInitialLoad)}
+								{#each $fetch.rows || [] as row, idx (row[relatedField])}
+									{#if !rowSelected(row)}
+										<div
+											class="option"
+											class:highlighted={focusIdx == idx + localValue.length}
+											bind:this={optionRefs[idx + localValue.length]}
+											on:mouseenter={() => (focusIdx = idx + localValue.length)}
+											on:mouseleave={() => (focusIdx = -1)}
+											on:mousedown|preventDefault={() => selectRow(row)}
+										>
+											{@render children?.()}
+											<span>{row.primaryDisplay || row[primaryDisplay]}</span>
+											<i class="ri-check-line"></i>
+										</div>
+									{/if}
+								{/each}
+								{#if $fetch.loading && $fetch.loaded}
+									<div class="option loading">
+										<i class="ph ph-spinner spin"></i>
+										Loading more...
 									</div>
 								{/if}
-							{/each}
+							{:else if $fetch.loading}
+								<div class="option loading">
+									<i class="ph ph-spinner spin"></i>
+									Loading...
+								</div>
+							{:else}
+								<div class="option">No Results Found</div>
+							{/if}
 						{/key}
-						{#if $optionsFetch?.loading}
-							<div class="option loading">
-								<i class="ph ph-spinner spin"></i>
-								Loading more...
-							</div>
-						{:else if !($optionsFetch.rows || []).some((row) => !rowSelected(row))}
-							<div class="option">No Results Found</div>
-						{/if}
 					{/if}
 				</div>
 			{/if}
