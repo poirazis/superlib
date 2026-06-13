@@ -4,7 +4,7 @@
 	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import { ICON_CATEGORIES, ICONS_BY_CATEGORY } from './phosphorIcons';
 
 	const dispatch = createEventDispatcher();
@@ -17,12 +17,12 @@
 	let searchQuery = $state('');
 	let selectedCategory = $state('all');
 	let originalValue = $state();
+	let localValue = $state(value);
 
 	let config = $derived(cellOptions ?? {});
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let optionError = $derived(config.error);
-	let optionIcon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
@@ -30,20 +30,17 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let showCategories = $derived(config.showCategories);
 
-
-	let inEdit = $derived($cellState === 'editing');
-	let tableCell = $derived(config.role === 'cell' || config.role === 'tableCell');
+	let inEdit = $derived($csm === 'editing');
+	let inline = $derived(config.role === 'inline');
 	let error = $derived(optionError);
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(inEdit && value !== originalValue);
+	let icon = $derived.by(() => {
+		const raw = config.icon;
+		if (!raw) return undefined;
+		return raw.replace(/^ph ph-/, '').replace(/^ph-/, '');
+	});
+	let isDirty = $derived(inEdit && localValue !== originalValue);
 
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
+	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
 
 	let categories = $derived(
 		Object.entries(ICON_CATEGORIES).map(([categoryId, label]) => ({
@@ -54,8 +51,9 @@
 	);
 
 	let iconName = $derived.by(() => {
-		if (!value) return '';
-		return value.startsWith('ph-') ? value.slice(3) : value;
+		if (!localValue) return '';
+		const raw = String(localValue);
+		return raw.replace(/^ph ph-/, '').replace(/^ph-/, '');
 	});
 
 	const buttonSize = 32;
@@ -68,6 +66,7 @@
 
 	let itemsPerRow = $derived(showCategories ? 9 : 6);
 	let containerHeight = $derived(buttonSize * rowsToShow + containerPadding * 2);
+	let input;
 
 	let rowData = $derived.by(() => {
 		const currentCategory = categories.find((cat) => cat.id === selectedCategory);
@@ -92,12 +91,9 @@
 	});
 
 	const onChange = (iconId) => {
-		const selectedValue = iconId === value ? '' : iconId;
-		dispatch('change', selectedValue || null);
-		open = false;
-		if (tableCell) {
-			cellState.submit();
-		}
+		const selectedValue = iconId === localValue ? null : iconId;
+		localValue = selectedValue;
+		csm.submit();
 	};
 
 	const handleKeydown = (event, iconId) => {
@@ -108,35 +104,27 @@
 	};
 
 	const clearSelection = () => {
+		localValue = null;
 		dispatch('change', null);
 		open = false;
 	};
 
-	export const cellState = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
 			}
 		},
 		view: {
-			_enter() {
-				open = false;
-			},
+			_enter() {},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
 			}
 		},
-		readonly: {
-			_enter() {
-				open = false;
-			}
-		},
+		readonly: {},
 		copyable: {
-			_enter() {
-				open = false;
-			},
 			click() {
-				copyAndTransition(() => cellState, String(value ?? ''));
+				copyAndTransition(() => csm, String(localValue ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -145,26 +133,19 @@
 				}
 			}
 		},
-		justCopied: deferJustCopied(() => cellState),
-		disabled: {
-			_enter() {
-				open = false;
-			}
-		},
+		justCopied: deferJustCopied(() => csm),
+		disabled: {},
 		editing: {
 			_enter() {
-				originalValue = value;
+				originalValue = localValue;
 				searchQuery = '';
 				selectedCategory = 'all';
-				open = false;
+				open = true;
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
-			},
-			click() {
-				open = !open;
 			},
 			keydown(e) {
 				if (e.key === ' ' || e.keyCode === 32) {
@@ -179,31 +160,28 @@
 			},
 			focusout(e) {
 				if (picker?.contains(e.relatedTarget)) return;
-				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				this.submit();
 			},
 			submit() {
-				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				dispatch('change', localValue);
+				return 'view';
 			},
 			cancel() {
-				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				localValue = originalValue;
+				return 'view';
 			}
 		}
 	});
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
-		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('disabled');
+		} else if (readonly && copyable && localValue) {
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
-		} else if (tableCell) {
-			if (!inEdit) cellState.goTo('view');
+			csm.goTo('readonly');
 		} else {
-			cellState.goTo('editing');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -212,11 +190,12 @@
 <BaseCell
 	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
+	{csm}
+	bind:anchor
 	{icon}
 	isDirty={isDirty && showDirty}
 	clearable={false}
+	naked={true}
 	{error}
 	{copyIcon}
 	{color}
@@ -224,134 +203,135 @@
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
-	{/if}
-
-	<div class="icon-display">
-		{#if value}
-			<i class="ph ph-{iconName}"></i>
-		{:else}
-			<div class="empty-state">
-				<i class="ph ph-image"></i>
-			</div>
-		{/if}
-	</div>
-</BaseCell>
-
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	{align}
-	{open}
-	maxHeight={450}
-	useAnchorWidth={false}
-	onClose={cellState.focusout}
->
-	<div
-		bind:this={picker}
-		class="icon-picker"
-		class:with-categories={showCategories}
-		style="
-			--icon-size: {iconSize};
-			--icon-padding: {iconPadding};
-			--items-per-row: {itemsPerRow};
-			--row-height: {rowHeight};
-		"
-	>
-		<div class="header">
-			{#if showCategories}
-				<div class="category-tabs">
-					{#each categories as category}
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button
-							class:selected={selectedCategory === category.id}
-							on:click={() => (selectedCategory = category.id)}
-							aria-label={`Show ${category.label} icons`}
-						>
-							{category.label}
-						</button>
-					{/each}
+	{#key localValue}
+		<div class="icon-display" class:inEdit>
+			{#if localValue}
+				<i class="ph ph-{iconName}"></i>
+			{:else}
+				<div class="empty-state">
+					<i class="ph ph-image"></i>
 				</div>
 			{/if}
-			<div class="search-container">
-				<i class="ph ph-magnifying-glass search-icon"></i>
-				<input
-					type="text"
-					bind:value={searchQuery}
-					placeholder="Search icons..."
-					class="search-input"
-					aria-label="Search icons"
-				/>
-				{#if searchQuery}
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button
-						class="clear-search"
-						on:click={() => (searchQuery = '')}
-						aria-label="Clear search"
+		</div>
+	{/key}
+</BaseCell>
+
+<!-- svelte-ignore event_directive_deprecated -->
+<SuperPopover {anchor} {open} {align} dismissible={false} maxHeight={450} useAnchorWidth={false}>
+	{#snippet children()}
+		<div
+			bind:this={picker}
+			on:focusout={csm.focusout}
+			class="icon-picker"
+			class:with-categories={showCategories}
+			style="
+					--icon-size: {iconSize};
+					--icon-padding: {iconPadding};
+					--items-per-row: {itemsPerRow};
+					--row-height: {rowHeight};
+				"
+		>
+			<div class="header">
+				{#if showCategories}
+					<div class="category-tabs">
+						{#each categories as category}
+							<!-- svelte-ignore event_directive_deprecated -->
+							<button
+								class:selected={selectedCategory === category.id}
+								on:click={() => (selectedCategory = category.id)}
+								aria-label={`Show ${category.label} icons`}
+							>
+								{category.label}
+							</button>
+						{/each}
+					</div>
+				{/if}
+				<div class="search-container">
+					<i class="ph ph-magnifying-glass search-icon"></i>
+					<input
+						type="text"
+						bind:value={searchQuery}
+						placeholder="Search icons..."
+						class="search-input"
+						aria-label="Search icons"
+					/>
+					{#if searchQuery}
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button
+							class="clear-search"
+							on:click={() => (searchQuery = '')}
+							aria-label="Clear search"
+						>
+							<i class="ph ph-x"></i>
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<div class="icons-grid-container">
+				{#if rowData.length > 0}
+					<VirtualList
+						items={rowData}
+						{itemHeight}
+						height={containerHeight}
+						width="100%"
+						let:item={rowIcons}
+						let:style
 					>
-						<i class="ph ph-x"></i>
+						<div class="icons-row" {style}>
+							{#each rowIcons as iconId}
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button
+									class="icon-button"
+									class:selected={iconName === iconId}
+									on:click={() => onChange(iconId)}
+									on:keydown={(e) => handleKeydown(e, iconId)}
+									aria-label={`Select ${iconId} icon`}
+									tabindex="0"
+								>
+									<i class="ph ph-{iconId}"></i>
+								</button>
+							{/each}
+						</div>
+					</VirtualList>
+				{:else}
+					<div class="no-results">
+						<i class="ph ph-magnifying-glass"></i>
+						<p>No icons found</p>
+					</div>
+				{/if}
+			</div>
+
+			<div class="footer">
+				{#if localValue}
+					<!-- svelte-ignore event_directive_deprecated -->
+					<button class="clear-button" on:click={clearSelection}>
+						<i class="ph ph-x"></i> Clear
 					</button>
 				{/if}
 			</div>
 		</div>
-
-		<div class="icons-grid-container">
-			{#if rowData.length > 0}
-				<VirtualList
-					items={rowData}
-					{itemHeight}
-					height={containerHeight}
-					width="100%"
-					let:item={rowIcons}
-					let:style
-				>
-					<div class="icons-row" {style}>
-						{#each rowIcons as iconId}
-							<!-- svelte-ignore event_directive_deprecated -->
-							<button
-								class="icon-button"
-								class:selected={iconName === iconId}
-								on:click={() => onChange(iconId)}
-								on:keydown={(e) => handleKeydown(e, iconId)}
-								aria-label={`Select ${iconId} icon`}
-								tabindex="0"
-							>
-								<i class="ph ph-{iconId}"></i>
-							</button>
-						{/each}
-					</div>
-				</VirtualList>
-			{:else}
-				<div class="no-results">
-					<i class="ph ph-magnifying-glass"></i>
-					<p>No icons found</p>
-				</div>
-			{/if}
-		</div>
-
-		<div class="footer">
-			{#if value}
-				<!-- svelte-ignore event_directive_deprecated -->
-				<button class="clear-button" on:click={clearSelection}>
-					<i class="ph ph-x"></i> Clear
-				</button>
-			{/if}
-		</div>
-	</div>
-</PickerPopover>
+	{/snippet}
+</SuperPopover>
 
 <style>
 	.icon-display {
 		display: flex;
+		aspect-ratio: 1;
 		align-items: center;
 		justify-content: center;
 		flex: 1 1 auto;
 		min-width: 0;
-		height: 100%;
-		padding: 0.25rem 0.75rem;
+		height: 2rem;
 		box-sizing: border-box;
-		font-size: 1.25rem;
+		font-size: 1rem;
+		border: 1px solid var(--spectrum-global-color-gray-300);
+		border-radius: 4px;
+	}
+
+	.icon-display.inEdit {
+		background: var(--spectrum-global-color-gray-50);
+		border-color: var(--spectrum-global-color-gray-400);
 	}
 
 	.empty-state {

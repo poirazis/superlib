@@ -9,6 +9,7 @@
 		placeholder?: boolean; // applies the .placeholder visual class
 		copyIcon?: 'always' | 'onhover' | string;
 		grabber?: boolean;
+		naked?: boolean;
 		color?: string;
 		background?: string;
 		styles?: Record<string, any>; // for use with stylable action
@@ -32,6 +33,7 @@
 		placeholder = false,
 		copyIcon = 'always',
 		grabber = false,
+		naked = false,
 		popupOpen = undefined,
 		color,
 		background,
@@ -59,8 +61,9 @@
 	class="super-cell {$csm} {role}"
 	class:error
 	class:dropdown={popupOpen !== undefined}
-	class:multirow={multirow || role == 'inline'}
+	class:multirow
 	class:grabber
+	class:naked-field={naked}
 	class:icon-on-hover={$csm === 'copyable' && copyIconOnHover}
 	class:open-popup={popupOpen}
 	class:isDirty
@@ -115,6 +118,7 @@
 			border-color 0.15s ease;
 		transition: border-color 0.15s ease;
 		color: var(--spectrum-global-color-gray-800);
+		font-size: 13px;
 	}
 
 	.super-cell:focus {
@@ -144,6 +148,41 @@
 	.super-cell.form {
 		border-color: var(--spectrum-global-color-gray-300);
 		border-radius: 0.25rem;
+	}
+
+	.super-cell.naked-field {
+		height: auto;
+		min-height: unset;
+		background: transparent !important;
+		border-color: transparent !important;
+		padding: unset !important;
+		max-width: fit-content !important;
+	}
+
+	.super-cell.naked-field.view,
+	.super-cell.naked-field.editing,
+	.super-cell.naked-field.readonly,
+	.super-cell.naked-field.disabled {
+		background: transparent;
+		border-color: transparent;
+	}
+
+	.super-cell.naked-field.view:hover,
+	.super-cell.naked-field.editing:hover,
+	.super-cell.naked-field.dropdown.view:hover,
+	.super-cell.naked-field.dropdown.editing:hover {
+		background: transparent;
+		border-color: transparent;
+		cursor: pointer;
+	}
+
+	.super-cell.naked-field:focus,
+	.super-cell.naked-field:focus-within {
+		border-color: transparent !important;
+	}
+
+	.super-cell.naked-field.error {
+		border-color: transparent;
 	}
 
 	.super-cell.inline {
@@ -308,6 +347,7 @@
 	}
 	:global(.super-cell > input.editor) {
 		font-style: inherit;
+		font-size: inherit;
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
@@ -320,10 +360,9 @@
 		outline: none;
 		cursor: inherit;
 		padding: var(--super-cell-padding);
+		border: none;
 	}
-	:global(.super-cell > input.disabled.editor) {
-		background: transparent;
-	}
+
 	:global(.super-cell.inline > input.editor) {
 		padding: 0.25rem 0.25rem !important;
 	}

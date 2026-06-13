@@ -312,7 +312,7 @@
 	}
 }
 
-.superCell.formInput {
+.superCell.form {
 	border-radius: 4px;
 	color: var(--spectrum-global-color-gray-800);
 	border: 1px solid var(--spectrum-global-color-gray-300);
@@ -354,7 +354,7 @@
 	}
 }
 
-.superCell.formInput.copyable {
+.superCell.form.copyable {
 	&:hover,
 	&:focus-within {
 		background-color: var(--spectrum-global-color-gray-100);
@@ -363,38 +363,19 @@
 	}
 }
 
-.superCell.formInput.copyable.just-copied {
+.superCell.form.copyable.just-copied {
 	color: var(--spectrum-global-color-gray-600);
 	border: 1px solid var(--spectrum-global-color-gray-500) !important;
 }
-.superCell.formInput.large {
+.superCell.form.large {
 	max-height: unset !important;
 }
 
-.superCell.formInput.error.inEdit:focus-within {
+.superCell.form.error.inEdit:focus-within {
 	border: 1px solid var(--spectrum-global-color-red-500);
 }
 
-/*  Table cell specific styles */
-.superCell.tableCell {
-	min-height: unset;
-	max-height: unset;
-	border: 1px solid transparent;
-	padding: 0 0.5rem !important;
-
-	&:hover:not(.readonly):not(.inEdit) {
-		border: 1px dashed var(--spectrum-global-color-blue-400);
-		cursor: pointer;
-	}
-
-	&.inEdit {
-		border-color: var(--spectrum-global-color-blue-400);
-		cursor: pointer;
-		background-color: var(--spectrum-global-color-gray-50);
-	}
-}
-
-.superCell.inlineInput {
+.superCell.inline {
 	position: relative;
 	border: 1px solid transparent;
 	border-radius: 2px;
@@ -404,19 +385,19 @@
 	align-items: center !important;
 }
 
-.superCell.inlineInput:hover:not(.readonly):not(.inEdit) {
+.superCell.inline:hover:not(.readonly):not(.inEdit) {
 	background-color: var(--spectrum-global-color-gray-50);
 	border: 1px solid var(--spectrum-global-color-gray-300);
 	cursor: pointer;
 }
 
-.superCell.inlineInput.inEdit {
+.superCell.inline.inEdit {
 	background-color: var(--spectrum-global-color-gray-50);
 	border: 1px solid var(--spectrum-global-color-gray-400);
 	cursor: text;
 }
 
-.superCell.inlineInput.copyable {
+.superCell.inline.copyable {
 	&:hover,
 	&:focus-within {
 		background-color: var(--spectrum-global-color-gray-100);
@@ -424,7 +405,7 @@
 	}
 }
 
-.superCell.inlineInput.copyable.just-copied {
+.superCell.inline.copyable.just-copied {
 	color: var(--spectrum-global-color-gray-600);
 	border: 1px solid var(--spectrum-global-color-gray-500) !important;
 }

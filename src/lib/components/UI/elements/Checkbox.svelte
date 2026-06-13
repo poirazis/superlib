@@ -9,7 +9,8 @@
 		disabled = false,
 		hovered = false,
 		locked = false,
-		size = 'small'
+		size = 'small',
+		anchor = $bindable(null)
 	} = $props();
 
 	function toggle() {
@@ -22,7 +23,16 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<button class:checked class:disabled class:hovered class:locked class={size} on:click={toggle}>
+<button
+	bind:this={anchor}
+	class:checked
+	class:disabled
+	class:hovered
+	class:locked
+	class={size}
+	tabindex={disabled || locked ? -1 : 0}
+	on:click={toggle}
+>
 	{#if checked}
 		<i class="ph ph-bold ph-check"></i>
 	{:else if partial}

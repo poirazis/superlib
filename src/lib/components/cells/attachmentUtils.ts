@@ -38,9 +38,7 @@ export async function uploadAttachments(
 }
 
 export function mapCellRole(role?: string) {
-	if (role === 'inlineInput' || role === 'inline') return 'inline';
-	if (role === 'tableCell' || role === 'cell') return 'cell';
-	return 'form';
+	return role === 'inline' ? 'inline' : 'form';
 }
 
 export function attachmentCopyText(attachments: AttachmentItem[] | null | undefined): string {

@@ -1,7 +1,7 @@
 <script>
 	import { getContext, createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import CellLinkPickerSelect from './CellLinkPickerSelect.svelte';
 	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
 	import './CellCommon.css';
@@ -37,7 +37,7 @@
 	let inEdit = $derived($cellState == 'Editing');
 	let isDirty = $derived(inEdit && originalValue != JSON.stringify(localValue));
 	let simpleView = $derived(config.relViewMode == 'text');
-	let inline = $derived(config.role == 'inlineInput');
+	let inline = $derived(config.role == 'inline');
 	let multirow = $derived(
 		config.controlType == 'expanded' && ((localValue?.length ?? 0) > 1 || inEdit)
 	);
@@ -189,10 +189,9 @@
 	bind:this={anchor}
 	class:isDirty={isDirty && config.showDirty}
 	class:inEdit
-	class:inline
+	class:inline={inline}
 	class:multirow
-	class:tableCell={config.role == 'tableCell'}
-	class:formInput={config.role == 'formInput'}
+	class:form={config.role == 'form'}
 	class:disabled={config.disabled}
 	class:readonly
 	class:open-popup={$editorState == 'Open'}
@@ -211,7 +210,7 @@
 	<div class="value" class:placeholder={(localValue?.length ?? 0) < 1}>
 		{#if simpleView}
 			<span>
-				{#if config.role == 'formInput' && localValue.length > 1}
+				{#if config.role == 'form' && localValue.length > 1}
 					({localValue.length})
 				{/if}
 				{localValue.map((v) => v.primaryDisplay).join(', ') || placeholder}
@@ -255,49 +254,53 @@
 			</div>
 		{/if}
 	</div>
-	{#if !readonly && (config.role == 'formInput' || inEdit)}
+	{#if !readonly && (config.role == 'form' || inEdit)}
 		<i class="ph ph-caret-down control-icon"></i>
 	{/if}
 </div>
 
-<PickerPopover {anchor} visible={inEdit} useAnchorWidth open={$editorState == 'Open'}>
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore event_directive_deprecated -->
-	<div
-		class="picker-container"
-		bind:this={popup}
-		on:keydown={(e) => {
-			if (e.key == 'Escape' || e.key == 'Tab') {
-				anchor?.focus();
-				editorState.close();
-				e.preventDefault();
-			}
-		}}
-	>
-		{#if fieldSchema?.recursiveTable}
-			<CellLinkPickerTree
-				{fieldSchema}
-				filter={filter ?? []}
-				search={config.search}
-				{limit}
-				joinColumn={config.joinColumn}
-				value={localValue}
-				{ownId}
-				multi={fieldSchema.relationshipType == 'many-to-many' ||
-					fieldSchema.relationshipType == 'many-to-one'}
-				on:change={handleChange}
-			/>
-		{:else}
-			<CellLinkPickerSelect
-				bind:api={pickerApi}
-				{fieldSchema}
-				filter={filter ?? []}
-				{singleSelect}
-				value={localValue}
-				wide={config.wide && !singleSelect}
-				on:change={handleChange}
-				on:focusout={cellState.popupfocusout}
-			/>
-		{/if}
-	</div>
-</PickerPopover>
+{#if inEdit}
+	<SuperPopover {anchor} useAnchorWidth open={$editorState == 'Open'}>
+		{#snippet children()}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
+			<div
+				class="picker-container"
+				bind:this={popup}
+				on:keydown={(e) => {
+					if (e.key == 'Escape' || e.key == 'Tab') {
+						anchor?.focus();
+						editorState.close();
+						e.preventDefault();
+					}
+				}}
+			>
+				{#if fieldSchema?.recursiveTable}
+					<CellLinkPickerTree
+						{fieldSchema}
+						filter={filter ?? []}
+						search={config.search}
+						{limit}
+						joinColumn={config.joinColumn}
+						value={localValue}
+						{ownId}
+						multi={fieldSchema.relationshipType == 'many-to-many' ||
+							fieldSchema.relationshipType == 'many-to-one'}
+						on:change={handleChange}
+					/>
+				{:else}
+					<CellLinkPickerSelect
+						bind:api={pickerApi}
+						{fieldSchema}
+						filter={filter ?? []}
+						{singleSelect}
+						value={localValue}
+						wide={config.wide && !singleSelect}
+						on:change={handleChange}
+						on:focusout={cellState.popupfocusout}
+					/>
+				{/if}
+			</div>
+		{/snippet}
+	</SuperPopover>
+{/if}

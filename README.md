@@ -19,11 +19,11 @@ Import components from the package entry point:
 
 ```svelte
 <script>
-	import { Button, SuperTabs, CellString, SuperField } from '@poirazis/superlib';
+	import { Button, SuperTabs, StringCell, SuperField } from '@poirazis/superlib';
 </script>
 
 <SuperField label="Name" field="name">
-	<CellString value="Jane" cellOptions={{ role: 'formInput' }} />
+	<StringCell value="Jane" cellOptions={{ role: 'form' }} />
 </SuperField>
 
 <Button text="Save" type="primary" />
@@ -55,15 +55,15 @@ Cell components are designed for inline editing in tables and forms. They use a 
 | Component | Description |
 | --- | --- |
 | `TextCell` | Simple text display cell |
-| `CellString` | String input with formatting and debounce |
+| `StringCell` | String input with formatting and debounce |
 | `CellStringMask` | Masked string input (IMask) |
-| `CellNumber` | Number input with formatting |
-| `CellSlider` | Numeric slider |
-| `CellBoolean` | Boolean toggle |
-| `CellDatetime` | Date/time picker |
-| `CellDateRange` | Date range picker |
+| `NumberCell` | Number input with formatting |
+| `SliderCell` | Numeric slider |
+| `BooleanCell` | Boolean toggle |
+| `DatetimeCell` | Date/time picker |
+| `DatetimeRangeCell` | Date range picker |
 | `BaseDropdownCell` | Select / input-select dropdown |
-| `CellSwitches` | Switches, buttons, and radio options |
+| `AdvancedOptionsCell` | Switches, buttons, and radio options |
 | `CellTags` | Tag input |
 | `CellLink` | Link field |
 | `CellLinkPickerSelect` | Link picker (select) |
@@ -84,7 +84,7 @@ Many cell components expect a Svelte context key named `sdk` (for example `proce
 ```svelte
 <script>
 	import { setContext } from 'svelte';
-	import { CellString } from '@poirazis/superlib';
+	import { StringCell } from '@poirazis/superlib';
 
 	setContext('sdk', {
 		processStringSync: (template, ctx) => String(ctx.value ?? ''),

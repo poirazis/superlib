@@ -1,7 +1,7 @@
 <script>
 	import { createEventDispatcher, getContext } from 'svelte';
 	import SuperTree from '../SuperTree/SuperTree.svelte';
-	import CellString from './CellString.svelte';
+	import StringCell from './StringCell.svelte';
 
 	const { API, fetchData, notificationStore } = getContext('sdk');
 	const dispatch = createEventDispatcher();
@@ -110,7 +110,7 @@
 	const pickerCellOptions = {
 		icon: 'ri-search-line',
 		initialState: 'Editing',
-		role: 'inlineInput',
+		role: 'inline',
 		debounce: 50
 	};
 
@@ -172,7 +172,7 @@
 <div class="control">
 	{#if search}
 		<div class="search">
-			<CellString
+			<StringCell
 				cellOptions={pickerCellOptions}
 				autofocus
 				on:change={handleSearch}

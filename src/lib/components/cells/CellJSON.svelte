@@ -44,13 +44,7 @@
 		config.multiline || config.controlType === 'multiline' || config.controlType === 'textarea'
 	);
 
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
+	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
 
 	const validateJson = (input) => {
 		if (input === null || input === undefined || input === '') return true;
@@ -106,7 +100,7 @@
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
 	let isDirty = $derived(!!lastEdit && normalizedValue !== localValue);
 	let clearable = $derived(
-		config.role != 'tableCell' &&
+		config.role !== 'inline' &&
 			$cellState === 'editing' &&
 			localValue != null &&
 			localValue !== ''

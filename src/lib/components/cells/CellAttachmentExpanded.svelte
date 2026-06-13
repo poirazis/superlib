@@ -235,7 +235,7 @@
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!anchor?.contains(related)) {
-					return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 				}
 			},
 			submit(e: FocusEvent) {
@@ -248,12 +248,12 @@
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 				}
 			},
 			cancel() {
 				localvalue = normalizeAttachments(originalValue, multi);
-				return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 			}
 		}
 	});
@@ -271,7 +271,7 @@
 			cellState.goTo('copyable');
 		} else if (readonly) {
 			cellState.goTo('readonly');
-		} else if (baseRole === 'cell') {
+		} else if (baseRole === 'inline') {
 			cellState.goTo('view');
 		} else {
 			cellState.goTo('editing');

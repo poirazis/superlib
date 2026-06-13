@@ -111,7 +111,7 @@
 	let displayValue = $derived(inEdit ? localValue : applyMask(value));
 	let clearable = $derived(
 		config.clearIcon !== false &&
-			config.role != 'tableCell' &&
+			config.role !== 'inline' &&
 			inEdit &&
 			localValue != null &&
 			localValue !== ''

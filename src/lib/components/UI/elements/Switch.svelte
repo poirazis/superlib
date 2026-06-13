@@ -8,8 +8,12 @@
 		disabled = false,
 		hovered = false,
 		size = 'medium',
-		tristate = false
+		tristate = false,
+		anchor = $bindable(null)
 	} = $props();
+
+	let isChecked = $derived(checked === true);
+	let isIndeterminate = $derived(tristate && checked === null);
 
 	function toggle() {
 		if (disabled) return;
@@ -25,7 +29,7 @@
 				next = false;
 			}
 		} else {
-			next = !checked;
+			next = !isChecked;
 		}
 
 		dispatch('change', { checked: next });
@@ -36,13 +40,23 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
 <div
+	bind:this={anchor}
 	class="switch-container {size}"
-	class:checked={checked === true}
-	class:indeterminate={checked === null}
+	class:checked={isChecked}
+	class:indeterminate={isIndeterminate}
 	class:disabled
 	class:hovered
-	on:click|stopPropagation={(e) => {
+	role="switch"
+	aria-checked={isChecked}
+	tabindex={disabled ? -1 : 0}
+	on:click|stopPropagation={() => {
 		toggle();
+	}}
+	on:keydown={(e) => {
+		if (e.key === ' ' || e.key === 'Enter') {
+			e.preventDefault();
+			toggle();
+		}
 	}}
 >
 	<div class="switch-track">

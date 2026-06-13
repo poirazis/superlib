@@ -2,7 +2,7 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import {
 		attachmentCopyText,
 		isMultiAttachment,
@@ -167,7 +167,7 @@
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 				}
 			},
 			submit(e: FocusEvent) {
@@ -180,13 +180,13 @@
 						dispatch('change', localvalue);
 					}
 					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 				}
 			},
 			cancel() {
 				localvalue = normalizeAttachments(originalValue, multi);
 				open = false;
-				return readonly ? 'readonly' : baseRole === 'cell' ? 'view' : 'editing';
+				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
 			}
 		}
 	});
@@ -204,7 +204,7 @@
 			cellState.goTo('copyable');
 		} else if (readonly) {
 			cellState.goTo('readonly');
-		} else if (baseRole === 'cell') {
+		} else if (baseRole === 'inline') {
 			cellState.goTo('view');
 		} else {
 			cellState.goTo('editing');
@@ -261,23 +261,25 @@
 			<span>{placeholder}</span>
 		{/if}
 
-		{#if !readonly && !disabled && baseRole !== 'cell'}
+		{#if !readonly && !disabled && baseRole !== 'inline'}
 			<i class="ph ph-caret-down action-icon"></i>
 		{/if}
 	</div>
 </BaseCell>
 
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	align="right"
-	{open}
-	maxHeight={350}
-	useAnchorWidth
-	onClose={cellState.focusout}
->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="attachments" bind:this={picker}>
+{#if inEdit}
+	<!-- svelte-ignore event_directive_deprecated -->
+	<SuperPopover
+		{anchor}
+		align="right"
+		{open}
+		maxHeight={350}
+		useAnchorWidth
+		on:close={cellState.focusout}
+	>
+		{#snippet children()}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="attachments" bind:this={picker}>
 		{#if localvalue?.length}
 			{#each localvalue as attachment, idx (idx)}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -337,8 +339,10 @@
 			style="display: none;"
 			on:change={handleFileSelect}
 		/>
-	</div>
-</PickerPopover>
+			</div>
+		{/snippet}
+	</SuperPopover>
+{/if}
 
 <style>
 	.attachment-display {

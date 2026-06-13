@@ -3,7 +3,7 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
 
@@ -21,12 +21,12 @@
 	let open = $state(false);
 	let customValue = $state('');
 	let originalValue = $state();
+	let localValue = $state(null);
 
 	let config = $derived(cellOptions ?? {});
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let optionError = $derived(config.error);
-	let optionIcon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
@@ -34,28 +34,25 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let allowCustom = $derived(config.allowCustom !== false);
 
-
 	let circle = $derived(config.swatch === 'circle');
 	let customColors = $derived(config.customColors || []);
 	let showTheme = $derived(config.themeColors !== false);
 	let showStatic = $derived(config.staticColors !== false);
-	let inEdit = $derived($cellState === 'editing');
-	let tableCell = $derived(config.role === 'cell' || config.role === 'tableCell');
+	let inEdit = $derived($csm === 'editing');
+	let inline = $derived(config.role === 'inline');
 	let error = $derived(optionError);
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(inEdit && value !== originalValue);
+	let icon = $derived.by(() => {
+		const raw = config.icon;
+		if (!raw) return undefined;
+		return raw.replace(/^ph ph-/, '').replace(/^ph-/, '');
+	});
+	let isDirty = $derived(inEdit && localValue !== originalValue);
 
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
+	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
 
 	let categories = $derived(generateCategories(showTheme, showStatic));
 	let customCategory = $derived(generateCustomCategory(customColors));
-	let checkColor = $derived(getCheckColor(value));
+	let checkColor = $derived(getCheckColor(localValue));
 
 	function generateCategories(showThemeColors, showStaticColors) {
 		return [
@@ -202,11 +199,12 @@
 	};
 
 	const onChange = (newValue) => {
-		const selectedValue = newValue === value ? null : newValue;
+		const selectedValue = newValue === localValue ? null : newValue;
+		localValue = selectedValue;
 		dispatch('change', selectedValue);
 		open = false;
-		if (tableCell) {
-			cellState.submit();
+		if (inline) {
+			csm.submit();
 		}
 	};
 
@@ -217,7 +215,7 @@
 		}
 	};
 
-	export const cellState = fsm('view', {
+	export const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -241,7 +239,7 @@
 				open = false;
 			},
 			click() {
-				copyAndTransition(() => cellState, String(value ?? ''));
+				copyAndTransition(() => csm, String(localValue ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -250,7 +248,7 @@
 				}
 			}
 		},
-		justCopied: deferJustCopied(() => cellState),
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				open = false;
@@ -258,8 +256,8 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
-				customValue = getCustomValue(value) ?? '';
+				originalValue = localValue;
+				customValue = getCustomValue(localValue) ?? '';
 				open = false;
 				dispatch('enteredit');
 			},
@@ -284,36 +282,40 @@
 			focusout(e) {
 				if (picker?.contains(e.relatedTarget)) return;
 				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				return readonly ? 'readonly' : inline ? 'view' : 'editing';
 			},
 			submit() {
 				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				return readonly ? 'readonly' : inline ? 'view' : 'editing';
 			},
 			cancel() {
 				open = false;
-				return readonly ? 'readonly' : tableCell ? 'view' : 'editing';
+				return readonly ? 'readonly' : inline ? 'view' : 'editing';
 			}
 		}
 	});
 
 	$effect(() => {
+		localValue = value ?? null;
+	});
+
+	$effect(() => {
 		if (!inEdit) {
-			customValue = getCustomValue(value) ?? '';
+			customValue = getCustomValue(localValue) ?? '';
 		}
 	});
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
-		} else if (readonly && copyable && value) {
-			cellState.goTo('copyable');
+			csm.goTo('disabled');
+		} else if (readonly && copyable && localValue) {
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
-		} else if (tableCell) {
-			if (!inEdit) cellState.goTo('view');
+			csm.goTo('readonly');
+		} else if (inline) {
+			if (!inEdit) csm.goTo('view');
 		} else {
-			cellState.goTo('editing');
+			csm.goTo('editing');
 		}
 	});
 </script>
@@ -322,11 +324,12 @@
 <BaseCell
 	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
+	{csm}
+	bind:anchor
 	{icon}
 	isDirty={isDirty && showDirty}
 	clearable={false}
+	naked={true}
 	{error}
 	{copyIcon}
 	{color}
@@ -334,37 +337,37 @@
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
-	{/if}
-
 	<div class="color-display">
-		<div
-			class="preview-swatch size--{size || 'M'}"
-			class:circle
-			class:readonly={readonly || disabled}
-		>
+		{#key localValue}
 			<div
-				class="preview-fill {spectrumTheme || ''}"
+				class="preview-swatch size--{size || 'M'}"
 				class:circle
-				style={value ? `background: ${value};` : ''}
-				class:placeholder={!value}
-			></div>
-		</div>
+				class:readonly={readonly || disabled}
+			>
+				<div
+					class="preview-fill {spectrumTheme || ''}"
+					class:circle
+					style={localValue ? `background: ${localValue};` : ''}
+					class:placeholder={!localValue}
+				></div>
+			</div>
+		{/key}
 	</div>
 </BaseCell>
 
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	align="left"
-	{open}
-	{offset}
-	maxHeight={500}
-	useAnchorWidth={false}
-	onClose={cellState.focusout}
->
-	<div bind:this={picker} class="container">
+{#if inEdit}
+	<!-- svelte-ignore event_directive_deprecated -->
+	<SuperPopover
+		{anchor}
+		{open}
+		align="left"
+		{offset}
+		maxHeight={500}
+		useAnchorWidth={false}
+		on:close={csm.focusout}
+	>
+		{#snippet children()}
+			<div bind:this={picker} class="container">
 		{#each categories as category}
 			<div class="category">
 				<div class="heading">{category.label}</div>
@@ -384,7 +387,7 @@
 								class="color-fill {spectrumTheme || ''}"
 								style="background: var(--spectrum-global-color-{colorName});"
 							>
-								{#if value === `var(--spectrum-global-color-${colorName})`}
+								{#if localValue === `var(--spectrum-global-color-${colorName})`}
 									<i class="ri-check-line" style="color: {checkColor};"></i>
 								{/if}
 							</div>
@@ -412,7 +415,7 @@
 							tabindex="0"
 						>
 							<div class="color-fill {spectrumTheme || ''}" style="background: {colorName};">
-								{#if value === colorName}
+								{#if localValue === colorName}
 									<i class="ri-check-line" style="color: {checkColor};"></i>
 								{/if}
 							</div>
@@ -443,8 +446,10 @@
 				</div>
 			</div>
 		{/if}
-	</div>
-</PickerPopover>
+			</div>
+		{/snippet}
+	</SuperPopover>
+{/if}
 
 <style>
 	.color-display {
@@ -453,7 +458,6 @@
 		flex: 1 1 auto;
 		min-width: 0;
 		height: 100%;
-		padding: 0.25rem 0.75rem;
 		box-sizing: border-box;
 	}
 

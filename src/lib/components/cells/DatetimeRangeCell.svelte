@@ -50,13 +50,7 @@
 	let inEdit = $derived($csm === 'editing');
 	let error = $derived(optionError);
 	let isDirty = $derived(inEdit && JSON.stringify(localValue) != JSON.stringify(originalValue));
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
+	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
 	let placeholder = $derived(readonly || disabled ? '' : config.placeholder || 'Select date range');
 
 	const formatDateRange = (from, to, dateFormat) => {

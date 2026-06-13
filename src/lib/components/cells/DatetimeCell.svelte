@@ -43,13 +43,7 @@
 	let inEdit = $derived($csm === 'editing');
 	let error = $derived(optionError);
 	let isDirty = $derived(inEdit && selection);
-	let baseRole = $derived(
-		config.role === 'inlineInput' || config.role === 'inline'
-			? 'inline'
-			: config.role === 'tableCell' || config.role === 'cell'
-				? 'cell'
-				: 'form'
-	);
+	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
 
 	const parseValueToDate = (valueStr) => {
 		if (valueStr == null || valueStr === '') return null;

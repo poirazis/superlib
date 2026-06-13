@@ -1,7 +1,7 @@
 <script>
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import CellSQLLinkPicker from './CellSQLLinkPicker.svelte';
 	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
 	import './CellCommon.css';
@@ -35,7 +35,7 @@
 	let ownId = $derived(ownIdProp || config?.ownId);
 	let inEdit = $derived($cellState == 'Editing');
 	let isDirty = $derived(inEdit && originalValue != JSON.stringify(localValue));
-	let inline = $derived(config.role == 'inlineInput');
+	let inline = $derived(config.role == 'inline');
 	let placeholder = $derived(config.placeholder || '');
 	let readonly = $derived(config.readonly || config.disabled);
 
@@ -211,9 +211,8 @@
 	bind:this={anchor}
 	class:isDirty={isDirty && config.showDirty}
 	class:inEdit
-	class:inline
-	class:tableCell={config.role == 'tableCell'}
-	class:formInput={config.role == 'formInput'}
+	class:inline={inline}
+	class:form={config.role == 'form'}
 	class:disabled={config.disabled}
 	class:readonly
 	class:open-popup={$editorState == 'Open'}
@@ -251,7 +250,7 @@
 					</div>
 				{:else}
 					<span>
-						{#if config.role == 'formInput' && localValue.length > 1}
+						{#if config.role == 'form' && localValue.length > 1}
 							({localValue.length})
 						{/if}
 						{localValue.map((v) => v.primaryDisplay).join(', ')}
@@ -259,43 +258,46 @@
 				{/if}
 			{/key}
 		</div>
-		{#if !readonly && (config.role == 'formInput' || inEdit)}
+		{#if !readonly && (config.role == 'form' || inEdit)}
 			<i class="ph ph-caret-down control-icon"></i>
 		{/if}
 	{/if}
 </div>
 
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	useAnchorWidth={true}
-	minWidth={config.pickerWidth || undefined}
-	align="left"
-	open={$editorState == 'Open'}
->
-	{#if fieldSchema?.recursiveTable}
-		<CellLinkPickerTree
-			{fieldSchema}
-			filter={filter ?? []}
-			search={config.search}
-			{limit}
-			joinColumn={config.joinColumn}
-			value={localValue}
-			{ownId}
-			{multi}
-			on:change={handleChange}
-		/>
-	{:else}
-		<CellSQLLinkPicker
-			{fieldSchema}
-			{filter}
-			{multi}
-			value={localValue}
-			bind:api={pickerApi}
-			on:change={handleChange}
-			on:focusout={cellState.popupfocusout}
-		>
-			{@render children?.()}
-		</CellSQLLinkPicker>
-	{/if}
-</PickerPopover>
+{#if inEdit}
+	<SuperPopover
+		{anchor}
+		useAnchorWidth={true}
+		minWidth={config.pickerWidth || undefined}
+		align="left"
+		open={$editorState == 'Open'}
+	>
+		{#snippet children()}
+			{#if fieldSchema?.recursiveTable}
+				<CellLinkPickerTree
+					{fieldSchema}
+					filter={filter ?? []}
+					search={config.search}
+					{limit}
+					joinColumn={config.joinColumn}
+					value={localValue}
+					{ownId}
+					{multi}
+					on:change={handleChange}
+				/>
+			{:else}
+				<CellSQLLinkPicker
+					{fieldSchema}
+					{filter}
+					{multi}
+					value={localValue}
+					bind:api={pickerApi}
+					on:change={handleChange}
+					on:focusout={cellState.popupfocusout}
+				>
+					{@render children?.()}
+				</CellSQLLinkPicker>
+			{/if}
+		{/snippet}
+	</SuperPopover>
+{/if}

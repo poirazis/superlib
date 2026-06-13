@@ -306,6 +306,7 @@
 	{role}
 	{error}
 	{icon}
+	naked={controlType === 'buttons'}
 	multirow={cellMultirow}
 	isDirty={isDirty && showDirty}
 >
@@ -480,7 +481,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
-		padding: 0.25rem 0.25rem;
+		padding: 0.25rem 0rem;
 		min-width: 0;
 		width: 100%;
 	}

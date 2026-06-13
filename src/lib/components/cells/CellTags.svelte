@@ -1,7 +1,7 @@
 <script>
 	import { getContext, createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
-	import PickerPopover from './PickerPopover.svelte';
+	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import { OPTIONS_COLORS_ARRAY } from './optionsColors';
 	import './CellCommon.css';
 
@@ -535,9 +535,8 @@
 	class:multirow={true}
 	style:color
 	style:background
-	class:inline={role == 'inlineInput'}
-	class:tableCell={role == 'tableCell'}
-	class:formInput={role == 'formInput'}
+	class:inline={role == 'inline'}
+	class:form={role == 'form'}
 	on:focusin={cellState.focus}
 	on:focusout={cellState.focusout}
 	on:keydown={editorState.handleKeyboard}
@@ -585,15 +584,11 @@
 	</div>
 </div>
 
-<PickerPopover
-	{anchor}
-	visible={inEdit}
-	useAnchorWidth
-	maxHeight={250}
-	{open}
-	onClose={cellState.focusout}
->
-	<div bind:this={editor} class="editor" tabindex="-1">
+{#if inEdit}
+	<!-- svelte-ignore event_directive_deprecated -->
+	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} on:close={cellState.focusout}>
+		{#snippet children()}
+			<div bind:this={editor} class="editor" tabindex="-1">
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore event_directive_deprecated -->
@@ -668,8 +663,10 @@
 				{/if}
 			</div>
 		{/if}
-	</div>
-</PickerPopover>
+			</div>
+		{/snippet}
+	</SuperPopover>
+{/if}
 
 <style>
 	.tags {
