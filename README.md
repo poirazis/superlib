@@ -62,8 +62,8 @@ Cell components are designed for inline editing in tables and forms. They use a 
 | `CellBoolean` | Boolean toggle |
 | `CellDatetime` | Date/time picker |
 | `CellDateRange` | Date range picker |
-| `CellOptions` | Single/multi select options |
-| `CellOptionsAdvanced` | Advanced options picker |
+| `BaseDropdownCell` | Select / input-select dropdown |
+| `CellSwitches` | Switches, buttons, and radio options |
 | `CellTags` | Tag input |
 | `CellLink` | Link field |
 | `CellLinkPickerSelect` | Link picker (select) |

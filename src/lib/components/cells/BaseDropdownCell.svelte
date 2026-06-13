@@ -120,6 +120,14 @@
 		return localValue[0]?.value ?? null;
 	}
 
+	function getEmittedLabel() {
+		if (multi) {
+			return localValue.map((option) => option.label);
+		}
+
+		return localValue[0]?.label ?? null;
+	}
+
 	function isSelected(option: Option) {
 		return localValue.some((selected) => selected.value === option.value);
 	}
@@ -129,25 +137,23 @@
 			goTo: (state) => state
 		},
 		view: {
-			mousedown: () => {
-				this.focus({});
-			},
 			focus: (e) => {
-				if (options.length === 0) {
-					console.warn('No options available for dropdown');
-					_message = 'No options available';
-					setTimeout(() => {
-						_message = null;
-					}, 1000);
-					return;
-				}
-
 				anchor?.focus();
 				return 'editing';
 			}
 		},
 		editing: {
 			_enter: () => {
+				if (options.length === 0 && !inputSelect) {
+					console.warn('No options available for dropdown');
+					_message = 'No options available';
+					setTimeout(() => {
+						_message = null;
+					}, 1000);
+					anchor?.blur();
+					return 'view';
+				}
+
 				open = true;
 				setTimeout(() => {
 					editor?.focus();
@@ -155,6 +161,7 @@
 			},
 			_exit: () => {
 				dispatch('change', getEmittedValue());
+				dispatch('labelChange', getEmittedLabel());
 				open = false;
 			},
 			debounce() {
@@ -197,7 +204,6 @@
 				if (anchor?.contains(e.relatedTarget as Node) || anchor?.contains(document.activeElement)) {
 					return;
 				}
-
 				return 'view';
 			}
 		},
@@ -258,7 +264,6 @@
 			}, 50);
 		}
 	});
-
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
@@ -267,9 +272,10 @@
 <BaseCell {id} bind:anchor {csm} {role} {error} {icon} popupOpen={open}>
 	{#key $csm}
 		{#if $csm !== 'editing' || !inputSelect}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<span class="value" class:placeholder={isEmpty}>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="value-content" use:tooltip on:click={csm.click}>
+				<div class="value-content" use:tooltip>
 					{#key localValue}
 						{#if isEmpty}
 							{_message || cellOptions?.placeholder || 'Select...'}
@@ -333,9 +339,15 @@
 	{/snippet}
 
 	<div class="options">
-		{#each options as option (option.value)}
-			{@render renderOption(option)}
-		{/each}
+		{#if options.length === 0}
+			<div class="option disabled">
+				{'No options available'}
+			</div>
+		{:else}
+			{#each options as option (option.value)}
+				{@render renderOption(option)}
+			{/each}
+		{/if}
 	</div>
 </SuperPopover>
 
@@ -356,6 +368,11 @@
 		align-items: center;
 		gap: 0.5em;
 		min-width: 0;
+	}
+
+	.option.disabled {
+		color: var(--spectrum-global-color-gray-500);
+		cursor: not-allowed;
 	}
 
 	.option:hover,

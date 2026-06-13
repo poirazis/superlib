@@ -4,7 +4,7 @@
 	const dispatch = createEventDispatcher();
 
 	let {
-		checked = $bindable(false),
+		checked = false,
 		disabled = false,
 		hovered = false,
 		size = 'medium',
@@ -14,19 +14,21 @@
 	function toggle() {
 		if (disabled) return;
 
+		let next = checked;
+
 		if (tristate) {
 			if (checked === false) {
-				checked = true;
+				next = true;
 			} else if (checked === true) {
-				checked = null;
+				next = null;
 			} else {
-				checked = false;
+				next = false;
 			}
 		} else {
-			checked = !checked;
+			next = !checked;
 		}
 
-		dispatch('change', { checked });
+		dispatch('change', { checked: next });
 	}
 </script>
 
