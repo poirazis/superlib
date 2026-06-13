@@ -17,7 +17,7 @@
 	let searchQuery = $state('');
 	let selectedCategory = $state('all');
 	let originalValue = $state();
-	let localValue = $state(value);
+	let localValue = $state();
 
 	let config = $derived(cellOptions ?? {});
 	let readonly = $derived(config.readonly);
@@ -116,7 +116,9 @@
 			}
 		},
 		view: {
-			_enter() {},
+			_enter() {
+				localValue = value;
+			},
 			focus() {
 				if (!readonly && !disabled) return 'editing';
 			}
