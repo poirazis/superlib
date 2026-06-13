@@ -44,7 +44,7 @@
 	let isDataSource = $derived(source === 'data' && !!datasource);
 	let serverSearch = $derived(isDataSource && (cellOptions?.search ?? true));
 	let showPopupSearch = $derived(
-		source === 'schema' || source === 'custom' || isDataSource
+		!inputSelect && (source === 'schema' || source === 'custom' || isDataSource)
 	);
 	let limit = $derived(cellOptions?.limit ?? 15);
 	let labelColumn = $derived(cellOptions?.labelColumn || cellOptions?.valueColumn);
@@ -109,9 +109,7 @@
 	});
 
 	let activeSearchTerm = $derived(
-		inputSelect
-			? popupSearchTerm || filterTerm || editor?.value || ''
-			: popupSearchTerm
+		inputSelect ? filterTerm || editor?.value || '' : popupSearchTerm
 	);
 
 	let displayOptions: Option[] = $derived.by(() => {
@@ -545,10 +543,10 @@
 	{/key}
 </BaseCell>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore event_directive_deprecated -->
 <SuperPopover bind:popup={popover} {anchor} {open} useAnchorWidth={true} dismissible={false}>
 	{#snippet renderOption(option: Option, idx: number, selected: boolean = isSelected(option))}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<!-- svelte-ignore event_directive_deprecated -->
 		<div
 			class="option"
 			class:selected
@@ -584,12 +582,11 @@
 					class="search"
 					class:placeholder={!popupSearchTerm}
 					type="text"
-					placeholder={$fetch?.loading && !$fetch?.rows?.length && isInitialLoad
-						? 'Loading...'
-						: 'Search'}
+					placeholder={'Search...'}
 					value={popupSearchTerm}
 					on:input={handlePopupSearch}
 					on:keydown={navigateOptions}
+					on:focusout={csm.focusout}
 				/>
 			</div>
 		{/if}
