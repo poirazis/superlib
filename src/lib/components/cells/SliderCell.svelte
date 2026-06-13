@@ -165,7 +165,7 @@
 		setLocalValue((localValue ?? lowerBound) + delta);
 	};
 
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -232,25 +232,6 @@
 			}
 		}
 	});
-
-	export const cellApi = {
-		focus: () => {
-			csm.focus();
-			trackElement?.focus();
-		},
-		reset: () => csm.reset(value),
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setError: (err) => {
-			errors = [...errors, err];
-		},
-		clearError: () => {
-			errors = [];
-		},
-		setValue: (val) => {
-			localValue = parseValue(val);
-		}
-	};
 
 	$effect(() => {
 		if (autofocus) {

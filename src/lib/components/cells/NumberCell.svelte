@@ -127,7 +127,7 @@
 		editText = localValue != null ? String(localValue) : '';
 	}
 
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -320,23 +320,6 @@
 			}
 		}
 	});
-
-	export const cellApi = {
-		focus: () => csm.focus(),
-		reset: () => csm.reset(value),
-		isEditing: () => $csm === 'editing',
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setError: (err) => {
-			errors = [...errors, err];
-		},
-		clearError: () => {
-			errors = [];
-		},
-		setValue: (val) => {
-			value = val;
-		}
-	};
 
 	$effect(() => {
 		if (autofocus) {

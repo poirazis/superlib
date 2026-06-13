@@ -79,7 +79,7 @@
 		}
 	};
 
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -146,16 +146,6 @@
 			}
 		}
 	});
-
-	export const cellApi = {
-		focus: () => csm.focus(),
-		reset: () => csm.reset(),
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setValue: (val) => {
-			localValue = !!val;
-		}
-	};
 
 	$effect(() => {
 		localValue = normalizeBoolean(value);

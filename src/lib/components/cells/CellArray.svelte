@@ -23,13 +23,7 @@
 	let inactive = $state(true);
 	let focusedRowIndex = $state(-1);
 	let cell = $state<HTMLElement | null>(null);
-	let cellApi = $state<
-		Array<{
-			focus?: () => void;
-			clearError?: () => void;
-			setError?: (err: string) => void;
-		}>
-	>([]);
+	let rowErrors = $state<string[]>([]);
 	let draggableItems = $state<Array<{ id: string; value: string; index: number }>>([]);
 
 	let config = $derived(cellOptions ?? {});
@@ -74,9 +68,21 @@
 		dispatch('labelChange', outputValue.join(', ') || null);
 	};
 
+	const clearAllRowErrors = () => {
+		rowErrors = cellValues.map(() => '');
+	};
+
+	const setRowError = (index: number, message: string) => {
+		rowErrors = cellValues.map((_, i) => (i === index ? message : rowErrors[i] ?? ''));
+	};
+
+	const focusRow = (index: number) => {
+		focusedRowIndex = index;
+	};
+
 	const brain = {
 		handleChange: (detail: unknown, index: number) => {
-			cellApi.forEach((api) => api?.clearError?.());
+			clearAllRowErrors();
 
 			const nextValue = detail == null ? '' : String(detail);
 			const isDuplicate = cellValues.some(
@@ -87,12 +93,13 @@
 				cellValues[index] = nextValue;
 				cellValues = [...cellValues];
 			} else if (isDuplicate) {
-				cellApi[index]?.setError?.('Duplicate value');
-				cellApi[index]?.focus?.();
+				setRowError(index, 'Duplicate value');
+				focusRow(index);
 			} else if (!nextValue) {
-				cellApi.splice(index, 1);
+				rowErrors.splice(index, 1);
 				cellValues.splice(index, 1);
 				cellValues = [...cellValues];
+				rowErrors = [...rowErrors];
 			}
 
 			commitValue();
@@ -116,7 +123,7 @@
 			if (filtered.length === 0) filtered = [''];
 
 			cellValues = [...filtered];
-			cellApi.forEach((api) => api?.clearError?.());
+			clearAllRowErrors();
 		},
 		moveItem: (fromIndex: number, toIndex: number) => {
 			if (toIndex < 0 || toIndex >= cellValues.length) return;
@@ -135,7 +142,7 @@
 				focusedRowIndex--;
 			}
 
-			cellApi[focusedRowIndex]?.focus?.();
+			if (focusedRowIndex >= 0) focusRow(focusedRowIndex);
 			commitValue();
 		},
 		updateRowOrder: (e: CustomEvent<{ items: typeof draggableItems }>) => {
@@ -159,10 +166,13 @@
 			if (cellValues.length <= parsedMin) return;
 
 			cellValues.splice(idx, 1);
+			rowErrors.splice(idx, 1);
 			if (cellValues.length === 0) {
 				cellValues.push('');
+				rowErrors.push('');
 			}
 			cellValues = [...cellValues];
+			rowErrors = [...rowErrors];
 
 			if (focusedRowIndex >= cellValues.length) {
 				focusedRowIndex = cellValues.length - 1;
@@ -175,14 +185,15 @@
 			commitValue();
 		},
 		handleAdd: () => {
-			cellApi.forEach((api) => api?.clearError?.());
+			clearAllRowErrors();
 
 			if (parsedMax > 0 && cellValues.length >= parsedMax) return;
 
-			const lastValue = (cellValues[cellValues.length - 1] || '').toString().trim();
+			const lastIndex = cellValues.length - 1;
+			const lastValue = (cellValues[lastIndex] || '').toString().trim();
 			if (!lastValue) {
-				cellApi[cellValues.length - 1]?.setError?.('Value cannot be empty');
-				cellApi[cellValues.length - 1]?.focus?.();
+				setRowError(lastIndex, 'Value cannot be empty');
+				focusRow(lastIndex);
 				return;
 			}
 
@@ -190,12 +201,13 @@
 				.slice(0, -1)
 				.some((val) => val.toString().trim() === lastValue);
 			if (isDuplicate) {
-				cellApi[cellValues.length - 1]?.setError?.('Duplicate value');
-				cellApi[cellValues.length - 1]?.focus?.();
+				setRowError(lastIndex, 'Duplicate value');
+				focusRow(lastIndex);
 				return;
 			}
 
 			cellValues = [...cellValues, ''];
+			rowErrors = [...rowErrors, ''];
 			focusedRowIndex = cellValues.length - 1;
 		},
 		moveRowUp: (index: number) => {
@@ -273,6 +285,7 @@
 
 	$effect(() => {
 		cellValues = enrichValue(value);
+		rowErrors = cellValues.map(() => '');
 	});
 
 	$effect(() => {
@@ -362,9 +375,13 @@
 						</div>
 					{/if}
 					<StringCell
-						bind:cellApi={cellApi[idx]}
 						{id}
-						cellOptions={{ ...config, role: 'inline', clearIcon: false }}
+						cellOptions={{
+							...config,
+							role: 'inline',
+							clearIcon: false,
+							error: rowErrors[idx] || undefined
+						}}
 						{fieldSchema}
 						value={draggableItem.value}
 						autofocus={focusedRowIndex === idx}
@@ -440,9 +457,13 @@
 					}}
 				>
 					<StringCell
-						bind:cellApi={cellApi[idx]}
 						{id}
-						cellOptions={{ ...config, role: 'inline', clearIcon: false }}
+						cellOptions={{
+							...config,
+							role: 'inline',
+							clearIcon: false,
+							error: rowErrors[idx] || undefined
+						}}
 						{fieldSchema}
 						value={cellValues[idx]}
 						{disabled}

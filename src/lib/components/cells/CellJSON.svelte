@@ -253,27 +253,6 @@
 		}
 	});
 
-	export const cellApi = {
-		focus: () => csm.focus(),
-		reset: () => {
-			localValue = normalizedValue;
-			errors = [];
-			isValidJson = validateJson(normalizedValue);
-			csm.goTo('view');
-		},
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setError: (err: string) => {
-			errors = [...errors, err];
-		},
-		clearError: () => {
-			errors = [];
-		},
-		setValue: (val: string | null) => {
-			localValue = val;
-		}
-	};
-
 	$effect(() => {
 		if ($csm !== 'editing') {
 			localValue = normalizedValue;

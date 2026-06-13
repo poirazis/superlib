@@ -117,7 +117,7 @@
 			localValue !== ''
 	);
 
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -264,22 +264,6 @@
 			}
 		}
 	});
-
-	export const cellApi = {
-		focus: () => csm.focus(),
-		reset: () => csm.reset(),
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setError: (err) => {
-			errors = [...errors, err];
-		},
-		clearError: () => {
-			errors = [];
-		},
-		setValue: (val) => {
-			value = val;
-		}
-	};
 
 	function initIMask(node, maskPattern) {
 		if (!maskPattern) {

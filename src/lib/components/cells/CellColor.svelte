@@ -215,7 +215,7 @@
 		}
 	};
 
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;

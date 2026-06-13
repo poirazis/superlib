@@ -60,7 +60,7 @@
 	let tabindex = $state(0);
 
 	// FSM created here — methods close over the derived/state values declared above
-	export const csm = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state) {
 				return state;
@@ -161,23 +161,6 @@
 			}
 		}
 	});
-
-	// Public API
-	export const cellApi = {
-		focus: () => csm.focus(),
-		reset: () => csm.reset(),
-		isDirty: () => isDirty,
-		getValue: () => localValue,
-		setError: (err) => {
-			errors = [...errors, err];
-		},
-		clearError: () => {
-			errors = [];
-		},
-		setValue: (val) => {
-			value = val;
-		}
-	};
 
 	// Lifecycle via effect (replaces onMount + onDestroy)
 	$effect(() => {

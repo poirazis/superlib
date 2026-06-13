@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, untrack } from 'svelte';
+	import { getContext, untrack, tick } from 'svelte';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import { tooltip } from '../../actions/tooltip';
@@ -27,7 +27,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	let fetch = $state();
+	let fetch = $state<ReturnType<typeof fetchData>>();
 
 	let multi = $derived(fieldSchema?.type === 'array' ? true : multiProp);
 	let inputSelect = $derived(cellOptions?.controlType === 'inputSelect');
@@ -39,39 +39,32 @@
 	let icon = $derived(cellOptions?.icon);
 	let filter = $derived(cellOptions?.filter);
 	let optionsViewMode = $derived(cellOptions?.optionsViewMode ?? 'text');
+	let source = $derived(cellOptions?.optionsSource);
+	let datasource = $derived(cellOptions?.optionsSource == 'data' ? cellOptions.datasource : null);
+	let isDataSource = $derived(source === 'data' && !!datasource);
+	let serverSearch = $derived(isDataSource && (cellOptions?.search ?? true));
+	let showPopupSearch = $derived(
+		source === 'schema' || source === 'custom' || isDataSource
+	);
+	let limit = $derived(cellOptions?.limit ?? 15);
+	let labelColumn = $derived(cellOptions?.labelColumn || cellOptions?.valueColumn);
+	let valueColumn = $derived(cellOptions?.valueColumn);
+	let sortColumn = $derived(cellOptions?.sortColumn);
+	let sortOrder = $derived(cellOptions?.sortOrder);
+	let debounceDelay = $derived(cellOptions?.debounce || 250);
 
 	let _message = $state<string | null>(null);
-
-	let source = $derived(cellOptions?.optionsSource);
-	let datasource = $derived(cellOptions.optionsSource == 'data' ? cellOptions.datasource : null);
-
-	let options: Option[] = $derived.by(() => {
-		if (source == 'schema') {
-			const inclusion = fieldSchema?.constraints?.inclusion || [];
-			return inclusion?.map((opt) => ({
-				label: opt,
-				value: opt,
-				color: fieldSchema?.optionColors?.[opt]
-			}));
-		} else if (source === 'custom') {
-			return (
-				cellOptions.customOptions?.map((opt) => ({
-					label: opt.label,
-					value: opt.value,
-					color: opt.color
-				})) ?? []
-			);
-		} else if (source === 'data' && datasource) {
-			return $fetch?.rows?.map((row) => ({
-				label: row[cellOptions.labelColumn || cellOptions.valueColumn],
-				value: row[cellOptions.valueColumn],
-				color: cellOptions.colorColumn ? row[cellOptions.colorColumn] : undefined,
-				icon: cellOptions.iconColumn ? row[cellOptions.iconColumn] : undefined
-			}));
-		}
-	});
+	let filterTerm = $state('');
+	let popupSearchTerm = $state('');
+	let focusIdx = $state(-1);
+	let listElement = $state<HTMLElement | null>(null);
+	let popupSearchInput = $state<HTMLInputElement | null>(null);
+	let searchTimer = $state<ReturnType<typeof setTimeout>>();
+	let currentLimit = $state(15);
+	let isInitialLoad = $state(true);
 
 	let anchor = $state<HTMLElement | null>(null);
+	let popover = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | null>(null);
 
 	let open = $state(false);
@@ -84,13 +77,70 @@
 
 	let tabindex = $state(0);
 
+	let allOptions: Option[] = $derived.by(() => {
+		if (source == 'schema') {
+			const inclusion = fieldSchema?.constraints?.inclusion || [];
+			return inclusion?.map((opt) => ({
+				label: opt,
+				value: opt,
+				color: fieldSchema?.optionColors?.[opt]
+			}));
+		} else if (source === 'custom') {
+			return (
+				cellOptions.customOptions?.map((opt) => ({
+					label: opt.label,
+					value: opt.value,
+					color: opt.color,
+					icon: opt.icon
+				})) ?? []
+			);
+		} else if (isDataSource) {
+			return (
+				$fetch?.rows?.map((row) => ({
+					label: row[labelColumn],
+					value: row[valueColumn],
+					color: cellOptions.colorColumn ? row[cellOptions.colorColumn] : undefined,
+					icon: cellOptions.iconColumn ? row[cellOptions.iconColumn] : undefined
+				})) ?? []
+			);
+		}
+
+		return [];
+	});
+
+	let activeSearchTerm = $derived(
+		inputSelect
+			? popupSearchTerm || filterTerm || editor?.value || ''
+			: popupSearchTerm
+	);
+
+	let displayOptions: Option[] = $derived.by(() => {
+		const base = allOptions ?? [];
+		const term = activeSearchTerm.trim();
+
+		if (!term) {
+			return base;
+		}
+
+		if (isDataSource && serverSearch) {
+			return base;
+		}
+
+		const lower = term.toLowerCase();
+		return base.filter((option) =>
+			String(option.label ?? option.value)
+				.toLowerCase()
+				.includes(lower)
+		);
+	});
+
 	function resolveToOptions(raw: any): Option[] {
 		const items = Array.isArray(raw) ? raw : raw != null && raw !== '' ? [raw] : [];
 
 		return items
 			.map((item) => {
 				if (item && typeof item === 'object' && 'value' in item) {
-					const matched = options?.find((option) => option.value === item.value);
+					const matched = allOptions?.find((option) => option.value === item.value);
 					return (
 						matched ?? {
 							label: item.label ?? String(item.value),
@@ -100,7 +150,7 @@
 					);
 				}
 
-				const matched = options?.find((option) => option.value === item);
+				const matched = allOptions?.find((option) => option.value === item);
 				if (matched) return matched;
 
 				if (inputSelect) {
@@ -132,19 +182,126 @@
 		return localValue.some((selected) => selected.value === option.value);
 	}
 
+	const buildDataQuery = (term: string) => {
+		const baseFilter = filter ?? [];
+
+		if (!term) {
+			return QueryUtils.buildQuery(baseFilter);
+		}
+
+		return QueryUtils.buildQuery([
+			...baseFilter,
+			{
+				field: labelColumn,
+				type: 'string',
+				operator: 'fuzzy',
+				value: term,
+				valueType: 'Value'
+			}
+		]);
+	};
+
+	const scheduleDataSearch = (term: string) => {
+		if (!fetch || !isDataSource || !serverSearch) return;
+
+		clearTimeout(searchTimer);
+		const delay = inputSelect ? debounceDelay : 200;
+
+		searchTimer = setTimeout(() => {
+			currentLimit = limit;
+			fetch?.update({
+				query: buildDataQuery(term),
+				limit: currentLimit,
+				sortColumn,
+				sortOrder
+			});
+		}, delay);
+	};
+
+	const fetchMore = () => {
+		if ($fetch?.loading) return;
+		if (($fetch?.rows?.length ?? 0) < currentLimit) return;
+		currentLimit += 100;
+		fetch?.update({
+			query: buildDataQuery(activeSearchTerm),
+			limit: currentLimit,
+			sortColumn,
+			sortOrder
+		});
+	};
+
+	const handleScroll = (e: Event) => {
+		if (!isDataSource) return;
+		const element = e.target as HTMLElement;
+		if (element.scrollTop + element.clientHeight >= element.scrollHeight - 50) {
+			fetchMore();
+		}
+	};
+
+	const scrollHighlightedIntoView = async () => {
+		if (focusIdx < 0 || !listElement) return;
+		await tick();
+		const highlighted = listElement.querySelector('.option.highlighted');
+		highlighted?.scrollIntoView({ block: 'nearest' });
+	};
+
+	const handlePopupSearch = (e: Event) => {
+		popupSearchTerm = (e.target as HTMLInputElement).value;
+		focusIdx = popupSearchTerm && displayOptions.length ? 0 : -1;
+		if (isDataSource && serverSearch) {
+			scheduleDataSearch(popupSearchTerm);
+		}
+	};
+
+	const navigateOptions = (e: KeyboardEvent) => {
+		const opts = displayOptions;
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			if (!open) {
+				open = true;
+				focusIdx = opts.length ? 0 : -1;
+				return;
+			}
+			focusIdx = Math.min(focusIdx + 1, opts.length - 1);
+			if (focusIdx < 0 && opts.length) focusIdx = 0;
+			scrollHighlightedIntoView();
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			focusIdx = Math.max(focusIdx - 1, 0);
+			scrollHighlightedIntoView();
+		} else if (e.key === 'Enter' && focusIdx > -1 && opts[focusIdx]) {
+			e.preventDefault();
+			csm.selectOption(opts[focusIdx].value);
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			open = false;
+			focusIdx = -1;
+			popupSearchTerm = '';
+			filterTerm = '';
+			anchor?.focus();
+		}
+	};
+
 	let csm = fsm('view', {
 		'*': {
 			goTo: (state) => state
 		},
 		view: {
-			focus: (e) => {
+			focus: () => {
 				anchor?.focus();
 				return 'editing';
+			},
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+					navigateOptions(e);
+					return 'editing';
+				}
 			}
 		},
 		editing: {
 			_enter: () => {
-				if (options.length === 0 && !inputSelect) {
+				if (allOptions.length === 0 && !inputSelect && !isDataSource) {
 					console.warn('No options available for dropdown');
 					_message = 'No options available';
 					setTimeout(() => {
@@ -155,28 +312,54 @@
 				}
 
 				open = true;
+				focusIdx = -1;
 				setTimeout(() => {
-					editor?.focus();
+					if (showPopupSearch) {
+						popupSearchInput?.focus();
+					} else if (inputSelect) {
+						editor?.focus();
+					} else {
+						anchor?.focus();
+					}
 				}, 0);
 			},
 			_exit: () => {
 				dispatch('change', getEmittedValue());
 				dispatch('labelChange', getEmittedLabel());
 				open = false;
+				popupSearchTerm = '';
+				filterTerm = '';
+				focusIdx = -1;
 			},
 			debounce() {
-				localValue = [
-					{
-						value: editor?.value,
-						label: editor?.value
-					}
-				];
+				const term = editor?.value ?? '';
+				filterTerm = term;
+				open = true;
+				focusIdx = term && displayOptions.length ? 0 : -1;
+
+				if (isDataSource) {
+					scheduleDataSearch(term);
+				}
+
+				localValue = term
+					? [
+							{
+								value: term,
+								label: term
+							}
+						]
+					: [];
 			},
-			click: (e) => {
+			click: () => {
 				open = !open;
+				if (open) {
+					focusIdx = -1;
+				}
 			},
 			selectOption: (newValue: string) => {
-				const option = options.find((item) => item.value === newValue);
+				const option =
+					displayOptions.find((item) => item.value === newValue) ??
+					allOptions.find((item) => item.value === newValue);
 				if (!option) return;
 
 				const pos = localValue.findIndex((item) => item.value === newValue);
@@ -194,17 +377,33 @@
 					localValue = [];
 				} else {
 					localValue = [option];
+					if (inputSelect && editor) {
+						editor.value = String(option.label ?? option.value);
+						filterTerm = editor.value;
+					}
 				}
 
 				open = false;
+				focusIdx = -1;
+				popupSearchTerm = '';
 				anchor?.blur();
 				return 'view';
 			},
 			focusout: (e: FocusEvent) => {
-				if (anchor?.contains(e.relatedTarget as Node) || anchor?.contains(document.activeElement)) {
+				const related = e.relatedTarget as Node | null;
+				if (
+					anchor?.contains(related) ||
+					anchor?.contains(document.activeElement) ||
+					popover?.contains(related) ||
+					popover?.contains(document.activeElement) ||
+					popover?.matches(':focus-within')
+				) {
 					return;
 				}
 				return 'view';
+			},
+			keydown(e: KeyboardEvent) {
+				navigateOptions(e);
 			}
 		},
 		copyable: {
@@ -217,7 +416,7 @@
 
 				copyAndTransition(() => csm, copyValue);
 			},
-			keydown(e) {
+			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
 					this.click();
@@ -229,18 +428,41 @@
 
 	$effect(() => {
 		void value;
-		void options;
+		void allOptions;
 		localValue = resolveToOptions(value);
 	});
 
 	$effect(() => {
+		void datasource;
 		void filter;
-		if (datasource) {
-			untrack(() => {
-				let query = QueryUtils.buildQuery(filter);
-				fetch = fetchData({ API, datasource, options: { query } });
+		void limit;
+		if (!isDataSource) return;
+
+		untrack(() => {
+			currentLimit = limit;
+			isInitialLoad = true;
+			fetch = fetchData({
+				API,
+				datasource,
+				options: {
+					query: QueryUtils.buildQuery(filter ?? []),
+					limit: currentLimit,
+					sortColumn,
+					sortOrder
+				}
 			});
+		});
+	});
+
+	$effect(() => {
+		if ($fetch?.loaded) {
+			isInitialLoad = false;
 		}
+	});
+
+	$effect(() => {
+		void displayOptions;
+		focusIdx = Math.min(focusIdx, Math.max(displayOptions.length - 1, -1));
 	});
 
 	$effect(() => {
@@ -263,6 +485,10 @@
 				csm.focus();
 			}, 50);
 		}
+
+		return () => {
+			clearTimeout(searchTimer);
+		};
 	});
 </script>
 
@@ -319,13 +545,15 @@
 	{/key}
 </BaseCell>
 
-<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
-	{#snippet renderOption(option: Option, selected: boolean = isSelected(option))}
+<SuperPopover bind:popup={popover} {anchor} {open} useAnchorWidth={true} dismissible={false}>
+	{#snippet renderOption(option: Option, idx: number, selected: boolean = isSelected(option))}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
 			class="option"
 			class:selected
+			class:highlighted={focusIdx === idx}
+			on:mouseenter={() => (focusIdx = idx)}
 			on:mousedown|preventDefault={() => csm.selectOption(option.value)}
 		>
 			{#if option?.icon}
@@ -338,20 +566,104 @@
 		</div>
 	{/snippet}
 
-	<div class="options">
-		{#if options.length === 0}
-			<div class="option disabled">
-				{'No options available'}
+	<div class="popup">
+		{#if showPopupSearch}
+			<div class="searchControl">
+				<i
+					class={$fetch?.loading && isInitialLoad
+						? 'ph ph-spinner spin'
+						: popupSearchTerm
+							? 'ri-filter-fill'
+							: 'ri-search-line'}
+					style:color={popupSearchTerm
+						? 'var(--spectrum-global-color-blue-400)'
+						: 'var(--spectrum-global-color-gray-700)'}
+				></i>
+				<input
+					bind:this={popupSearchInput}
+					class="search"
+					class:placeholder={!popupSearchTerm}
+					type="text"
+					placeholder={$fetch?.loading && !$fetch?.rows?.length && isInitialLoad
+						? 'Loading...'
+						: 'Search'}
+					value={popupSearchTerm}
+					on:input={handlePopupSearch}
+					on:keydown={navigateOptions}
+				/>
 			</div>
-		{:else}
-			{#each options as option (option.value)}
-				{@render renderOption(option)}
-			{/each}
 		{/if}
+
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="options"
+			bind:this={listElement}
+			on:scroll={handleScroll}
+			on:mousedown|preventDefault={() => {}}
+		>
+			{#if displayOptions.length === 0}
+				<div class="option disabled">
+					{#if isDataSource && $fetch?.loading}
+						<i class="ph ph-spinner spin"></i>
+						Loading...
+					{:else}
+						No options available
+					{/if}
+				</div>
+			{:else}
+				{#each displayOptions as option, idx (option.value)}
+					{@render renderOption(option, idx)}
+				{/each}
+				{#if isDataSource && $fetch?.loading && $fetch.loaded}
+					<div class="option disabled loading">
+						<i class="ph ph-spinner spin"></i>
+						Loading more...
+					</div>
+				{/if}
+			{/if}
+		</div>
 	</div>
 </SuperPopover>
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.searchControl {
+		height: 2rem;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
+		display: flex;
+		align-items: center;
+		padding-left: 0.5rem;
+		gap: 0.25rem;
+		flex-shrink: 0;
+	}
+
+	.searchControl > i {
+		font-size: 14px;
+	}
+
+	.searchControl > input {
+		height: 100%;
+		width: 100%;
+		outline: none;
+		background: none;
+		border: none;
+		color: inherit;
+		padding-left: 0.5rem;
+		font-family: inherit;
+		font-size: inherit;
+	}
+
+	.searchControl > input.placeholder {
+		font-style: italic;
+		color: var(--spectrum-global-color-gray-600);
+	}
+
 	.options {
 		display: flex;
 		flex-direction: column;
@@ -373,10 +685,16 @@
 	.option.disabled {
 		color: var(--spectrum-global-color-gray-500);
 		cursor: not-allowed;
+		gap: 0.5rem;
+	}
+
+	.option.loading {
+		font-style: italic;
+		justify-content: center;
 	}
 
 	.option:hover,
-	.option.selected {
+	.option.highlighted {
 		background-color: var(--spectrum-global-color-gray-100);
 	}
 
@@ -486,5 +804,18 @@
 		border-radius: 2px;
 		background-color: var(--option-color, var(--spectrum-global-color-gray-300));
 		flex-shrink: 0;
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		from {
+			transform: rotate(0deg);
+		}
+		to {
+			transform: rotate(360deg);
+		}
 	}
 </style>
