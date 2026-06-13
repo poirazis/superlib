@@ -31,6 +31,7 @@
 
 	let anchor = $state<HTMLElement | null>(null);
 	let picker = $state<HTMLElement | null>(null);
+	let popup = $state<HTMLElement | null>(null);
 	let pickerApi = $state<{ focus?: () => void }>();
 	let open = $state(false);
 	let localValue = $state<SQLLinkItem[]>([]);
@@ -40,6 +41,7 @@
 	let enrichGeneration = 0;
 
 	let config = $derived(cellOptions ?? {});
+	let resolvedFilter = $derived(filter ?? []);
 	let relatedField = $derived(fieldSchema?.relatedField || 'id');
 	let relatedTableId = $derived(fieldSchema?.tableId);
 	let pills = $derived(config.relViewMode === 'pills');
@@ -61,6 +63,17 @@
 	const getEmittedLabel = () => {
 		if (!localValue.length) return null;
 		return localValue.map((item) => item.primaryDisplay).join(', ');
+	};
+
+	const focusMovedToPicker = (related: EventTarget | null) => {
+		if (!(related instanceof Node)) {
+			return popup?.matches(':focus-within') ?? false;
+		}
+		return (
+			picker?.contains(related) ||
+			popup?.contains(related) ||
+			anchor?.contains(related)
+		);
 	};
 
 	const parseRow = (row: Record<string, unknown>, displayField?: string): SQLLinkItem | null => {
@@ -220,11 +233,11 @@
 				}
 			},
 			focusout: (e: FocusEvent) => {
-				if (picker?.contains(e.relatedTarget as Node)) return;
+				if (focusMovedToPicker(e.relatedTarget)) return;
 				return 'view';
 			},
 			popupfocusout: (e: FocusEvent) => {
-				if (anchor?.contains(e.relatedTarget as Node)) return;
+				if (focusMovedToPicker(e.relatedTarget)) return;
 				return 'view';
 			},
 			selectChange: (nextValue: SQLLinkItem[]) => {
@@ -347,15 +360,16 @@
 	{/key}
 </BaseCell>
 
-<SuperPopover
-	{anchor}
-	{open}
-	useAnchorWidth={true}
-	minWidth={config.pickerWidth || undefined}
-	align="left"
-	dismissible={false}
->
-	{#if $csm === 'editing'}
+{#if $csm === 'editing'}
+	<SuperPopover
+		{anchor}
+		bind:open
+		bind:popup
+		useAnchorWidth={true}
+		minWidth={config.pickerWidth || undefined}
+		align="left"
+		dismissible={false}
+	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
@@ -372,7 +386,7 @@
 			{#if fieldSchema?.recursiveTable}
 				<CellLinkPickerTree
 					{fieldSchema}
-					filter={filter ?? []}
+					filter={resolvedFilter}
 					search={config.search}
 					{limit}
 					joinColumn={config.joinColumn}
@@ -384,7 +398,7 @@
 			{:else}
 				<CellSQLLinkPicker
 					{fieldSchema}
-					{filter}
+					filter={resolvedFilter}
 					{multi}
 					value={localValue}
 					bind:api={pickerApi}
@@ -395,8 +409,8 @@
 				</CellSQLLinkPicker>
 			{/if}
 		</div>
-	{/if}
-</SuperPopover>
+	</SuperPopover>
+{/if}
 
 <style>
 	span.value {

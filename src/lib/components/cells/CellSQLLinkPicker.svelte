@@ -62,21 +62,28 @@
 	let optionsFetch = $state();
 
 	$effect(() => {
+		if (!tableId) {
+			optionsFetch = undefined;
+			return;
+		}
+
 		optionsFetch = fetchData({
 			API,
 			datasource: {
 				type: 'table',
-				tableId: tableId
+				tableId
 			},
 			options: {
-				query: defaultQuery,
-				limit: initLimit
+				query,
+				limit: currentLimit
 			}
 		});
 	});
 
 	$effect(() => {
-		optionsFetch?.update({ query: query, limit: currentLimit });
+		if ($optionsFetch?.loaded) {
+			isInitialLoad = false;
+		}
 	});
 
 	let primaryDisplay = $derived($optionsFetch?.definition?.primaryDisplay || 'id');
@@ -351,9 +358,16 @@
 						</div>
 					{/each}
 
-					{#if $optionsFetch}
+					{#if !tableId}
+						<div class="option">Configure a related table</div>
+					{:else if $optionsFetch?.loading && isInitialLoad}
+						<div class="option loading">
+							<i class="ph ph-spinner spin"></i>
+							Loading...
+						</div>
+					{:else if $optionsFetch?.loaded}
 						{#key localValue.length}
-							{#each $optionsFetch.rows as row, idx (row[relatedField])}
+							{#each $optionsFetch.rows || [] as row, idx (row[relatedField])}
 								{#if !rowSelected(row)}
 									<div
 										class="option"
@@ -373,11 +387,11 @@
 						{#if $optionsFetch?.loading}
 							<div class="option loading">
 								<i class="ph ph-spinner spin"></i>
-								Loading...
+								Loading more...
 							</div>
+						{:else if !($optionsFetch.rows || []).some((row) => !rowSelected(row))}
+							<div class="option">No Results Found</div>
 						{/if}
-					{:else}
-						<div class="option">No Results Found</div>
 					{/if}
 				</div>
 			{/if}
