@@ -1,306 +1,588 @@
-<script>
-	import { getContext, createEventDispatcher } from 'svelte';
+<script lang="ts">
+	import { getContext, untrack } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
+	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import CellLinkPickerSelect from './CellLinkPickerSelect.svelte';
 	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
-	import './CellCommon.css';
+	import { tooltip } from '../../actions/tooltip';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+
+	interface LinkItem {
+		_id: string;
+		primaryDisplay: string;
+	}
 
 	const dispatch = createEventDispatcher();
-	const { API } = getContext('sdk');
+	const { API, fetchData, QueryUtils } = getContext('sdk');
 
 	let {
+		id,
 		value,
 		fieldSchema,
 		cellOptions,
-		simpleView: simpleViewProp = true,
-		filter = [],
+		filter: filterProp = [],
 		limit = 100,
 		ownId: ownIdProp,
-		isUserSelect = false
+		isUserSelect = false,
+		autofocus = false
 	} = $props();
 
-	// svelte-ignore state_referenced_locally
-	let originalValue = $state(JSON.stringify(value));
-	let anchor = $state();
-	let popup = $state();
-	let pickerApi = $state();
-	let localValue = $state([]);
+	let anchor = $state<HTMLElement | null>(null);
+	let picker = $state<HTMLElement | null>(null);
+	let pickerApi = $state<{ focus?: () => void }>();
+	let open = $state(false);
+	let localValue = $state<LinkItem[]>([]);
+	let originalValue = $state('[]');
+	let primaryDisplayField = $state<string | undefined>();
+	let loadingMissing = $state(false);
+	let enrichGeneration = 0;
 
 	let config = $derived(cellOptions ?? {});
+	let filter = $derived(filterProp?.length ? filterProp : (config.filter ?? []));
 	let multi = $derived(!fieldSchema?.type?.includes('_single'));
 	let isUser = $derived(fieldSchema?.type?.includes('bb_reference') || isUserSelect);
-	let pills = $derived(config.relViewMode == 'pills');
-	let valueIcon = $derived(fieldSchema?.type == 'link' ? 'ri-edit-box-line' : 'ri-user-line');
-	let links = $derived(config.relViewMode == 'links' && !isUser);
+	let pills = $derived(config.relViewMode === 'pills');
+	let links = $derived(config.relViewMode === 'links' && !isUser);
+	let valueIcon = $derived(fieldSchema?.type === 'link' ? 'ri-edit-box-line' : 'ri-user-line');
 	let ownId = $derived(ownIdProp || config?.ownId);
-	let inEdit = $derived($cellState == 'Editing');
-	let isDirty = $derived(inEdit && originalValue != JSON.stringify(localValue));
-	let simpleView = $derived(config.relViewMode == 'text');
-	let inline = $derived(config.role == 'inline');
+	let plaintext = $derived(config.relViewMode === 'text' || !config.relViewMode);
+	let inline = $derived(config.role === 'inline');
 	let multirow = $derived(
-		config.controlType == 'expanded' && ((localValue?.length ?? 0) > 1 || inEdit)
+		config.controlType === 'expanded' &&
+			((localValue?.length ?? 0) > 1 || $csm === 'editing')
 	);
 	let singleSelect = $derived(
-		fieldSchema?.relationshipType == 'one-to-many' ||
-			fieldSchema?.relationshipType == 'self' ||
+		fieldSchema?.relationshipType === 'one-to-many' ||
+			fieldSchema?.relationshipType === 'self' ||
 			!multi
 	);
 	let returnSingle = $derived(isUser && !multi);
 	let placeholder = $derived(config.placeholder || '');
-	let readonly = $derived(config.readonly || config.disabled);
+	let disabled = $derived(config.disabled);
+	let readonly = $derived(config.readonly);
+	let copyable = $derived(config.copyable);
+	let copyIcon = $derived(config.copyIcon ?? 'always');
+	let role = $derived(config.role);
+	let error = $derived(config.error);
+	let icon = $derived(config.icon);
+	let showDirty = $derived(config.showDirty);
+	let debounced = $derived(config.debounced);
+	let tableId = $derived(fieldSchema?.tableId);
+	let isEmpty = $derived((localValue?.length ?? 0) < 1);
+	let isDirty = $derived($csm === 'editing' && originalValue !== JSON.stringify(localValue));
+	let tabindex = $state(0);
 
-	// svelte-ignore state_referenced_locally
-	export const cellState = fsm(cellOptions?.initialState ?? 'View', {
+	let datasourceType = $derived(isUser ? 'user' : 'table');
+	let writable = $derived(!disabled && !readonly);
+
+	let optionsFetch = $state<ReturnType<typeof fetchData> | undefined>();
+
+	const parseId = (id: string) => id;
+
+	const parseLinkItem = (item: unknown, primaryDisplay?: string): LinkItem | null => {
+		if (!item) return null;
+
+		if (typeof item === 'string') {
+			return { _id: parseId(item), primaryDisplay: item };
+		}
+
+		if (typeof item !== 'object') return null;
+
+		const row = item as Record<string, unknown>;
+		const rowId = (row._id ?? row.id) as string | undefined;
+		if (!rowId) return null;
+
+		if ('primaryDisplay' in row && Object.keys(row).length <= 2) {
+			return {
+				_id: parseId(rowId),
+				primaryDisplay: String(row.primaryDisplay ?? rowId)
+			};
+		}
+
+		const displayField = primaryDisplay || primaryDisplayField;
+		if (displayField && row[displayField] != null) {
+			return {
+				_id: parseId(rowId),
+				primaryDisplay: String(row[displayField])
+			};
+		}
+
+		return {
+			_id: parseId(rowId),
+			primaryDisplay: String(row.name ?? rowId)
+		};
+	};
+
+	const toLocalValue = (raw: unknown): LinkItem[] => {
+		if (raw == null || raw === '') return [];
+
+		if (fieldSchema?.relationshipType === 'self' && !Array.isArray(raw) && typeof raw !== 'object') {
+			return [{ _id: String(raw), primaryDisplay: String(raw) }];
+		}
+
+		if (multi) {
+			return Array.isArray(raw)
+				? raw.map((item) => parseLinkItem(item, primaryDisplayField)).filter((item): item is LinkItem => !!item)
+				: [];
+		}
+
+		const item = parseLinkItem(raw, primaryDisplayField);
+		return item ? [item] : [];
+	};
+
+	const getEmittedValue = () => {
+		if (returnSingle && localValue.length) return localValue[0];
+		if (singleSelect && !multi) return localValue[0] ?? null;
+		return localValue;
+	};
+
+	const getEmittedLabel = () => {
+		if (!localValue.length) return null;
+		return localValue.map((item) => item.primaryDisplay).join(', ');
+	};
+
+	const loadMissingOptions = async (
+		items: LinkItem[],
+		linkedTableId?: string,
+		primaryDisplay?: string
+	) => {
+		if (!linkedTableId || !primaryDisplay || !writable) return;
+
+		const missingIds = items
+			.filter((item) => item.primaryDisplay === item._id || !item.primaryDisplay)
+			.map((item) => item._id);
+
+		if (!missingIds.length || loadingMissing) return;
+
+		loadingMissing = true;
+		try {
+			const res = await API.searchTable(linkedTableId, {
+				query: {
+					oneOf: {
+						_id: missingIds
+					}
+				}
+			});
+
+			const enriched = new Map(localValue.map((item) => [item._id, item]));
+
+			for (const row of res.rows ?? []) {
+				const option = parseLinkItem(row, primaryDisplay);
+				if (option) enriched.set(option._id, option);
+			}
+
+			for (const id of missingIds) {
+				if (!enriched.has(id)) {
+					enriched.set(id, { _id: id, primaryDisplay: id });
+				}
+			}
+
+			localValue = items.map((item) => enriched.get(item._id) ?? item);
+		} catch (err) {
+			console.error('Error loading missing relationship rows', err);
+		} finally {
+			loadingMissing = false;
+		}
+	};
+
+	const enrichSelfReference = async (raw: unknown, linkedTableId?: string, generation?: number) => {
+		if (
+			fieldSchema?.relationshipType !== 'self' ||
+			!raw ||
+			Array.isArray(raw) ||
+			typeof raw === 'object' ||
+			!linkedTableId
+		) {
+			return;
+		}
+
+		try {
+			const row = await API.fetchRow(linkedTableId, raw, true);
+			if (generation !== enrichGeneration) return;
+
+			const displayField = primaryDisplayField || fieldSchema?.primaryDisplay;
+			localValue = [
+				{
+					_id: row.id ?? row._id,
+					primaryDisplay: displayField
+						? String(row[displayField] ?? row.id ?? row._id)
+						: String(row.name ?? row.id ?? row._id)
+				}
+			];
+		} catch {
+			if (generation === enrichGeneration) localValue = [];
+		}
+	};
+
+	const csm = fsm('view', {
 		'*': {
-			goTo(state) {
-				return state;
-			},
-			reset() {
-				localValue = undefined;
+			goTo: (state: string) => state
+		},
+		view: {
+			focus: () => {
+				if (!readonly && !disabled) return 'editing';
 			}
 		},
-		View: {
-			_enter() {},
-			focus() {
-				if (!config.readonly && !config.disabled) return 'Editing';
-			}
-		},
-		Editing: {
-			_enter() {
+		editing: {
+			_enter: () => {
 				originalValue = JSON.stringify(localValue);
-				editorState.open();
+				open = true;
 				dispatch('enteredit');
+				setTimeout(() => pickerApi?.focus?.(), 0);
 			},
-			_exit() {
-				editorState.close();
+			_exit: () => {
+				open = false;
 				dispatch('exitedit');
-			},
-			focusout(e) {
-				if (popup?.contains(e?.relatedTarget)) return;
-				this.submit();
-			},
-			popupfocusout(e) {
-				if (anchor != e?.relatedTarget) {
-					this.submit();
+				if (!debounced) {
+					dispatch('change', getEmittedValue());
+					dispatch('labelChange', getEmittedLabel());
 				}
 			},
-			toggle() {
-				editorState.toggle();
+			click: () => {
+				open = !open;
 			},
-			clear() {
-				localValue = [];
-			},
-			submit() {
-				if (isDirty) {
-					dispatch('change', returnSingle && localValue ? localValue[0] : localValue);
+			keydown: (e: KeyboardEvent) => {
+				if (e.key === ' ' || e.keyCode === 32) {
+					e.preventDefault();
+					open = !open;
+				} else if (e.key === 'Escape') {
+					if (open) {
+						open = false;
+					} else {
+						localValue = JSON.parse(originalValue);
+						anchor?.blur();
+						return 'view';
+					}
+				} else if (e.key === 'Tab' && open) {
+					anchor?.blur();
+					return 'view';
+				} else if (open) {
+					pickerApi?.focus?.();
 				}
-				return 'View';
 			},
-			cancel() {
-				localValue = JSON.parse(originalValue);
-				anchor?.blur();
-				return 'View';
-			}
-		}
-	});
+			focusout: (e: FocusEvent) => {
+				if (picker?.contains(e.relatedTarget as Node)) return;
+				return 'view';
+			},
+			popupfocusout: (e: FocusEvent) => {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return 'view';
+			},
+			selectChange: (nextValue: LinkItem[]) => {
+				localValue = nextValue;
 
-	const editorState = fsm('Closed', {
-		Open: {
-			close() {
-				return 'Closed';
-			},
-			toggle() {
-				return 'Closed';
+				if (singleSelect) {
+					open = false;
+					anchor?.blur();
+					return 'view';
+				}
+
+				if (debounced) {
+					dispatch('change', getEmittedValue());
+					dispatch('labelChange', getEmittedLabel());
+				}
 			}
 		},
-		Closed: {
-			open() {
-				return 'Open';
+		readonly: {},
+		disabled: {},
+		copyable: {
+			click() {
+				copyAndTransition(() => csm, getEmittedLabel() ?? '');
 			},
-			toggle() {
-				return 'Open';
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
 			}
-		}
+		},
+		justCopied: deferJustCopied(() => csm)
 	});
 
-	const enrichValue = (x) => {
-		if (fieldSchema?.relationshipType == 'self' && x && !Array.isArray(x)) {
-			API.fetchRow(fieldSchema.tableId, x, true)
-				.then((row) => {
-					localValue = [
-						{
-							_id: row.id,
-							primaryDisplay: fieldSchema.primaryDisplay
-								? row[fieldSchema.primaryDisplay]
-								: row.name || row.id
-						}
-					];
-				})
-				.catch(() => {
-					localValue = [];
-				});
-			return localValue || [];
-		} else if (multi) {
-			return x ? [...x] : [];
-		}
-		return x ? [x] : [];
+	const handlePickerChange = (e: CustomEvent<LinkItem[]>) => {
+		csm.selectChange(e.detail);
 	};
 
 	$effect(() => {
-		localValue = enrichValue(value);
+		const raw = value;
+		const linkedTableId = tableId;
+		const generation = ++enrichGeneration;
+
+		untrack(async () => {
+			localValue = toLocalValue(raw);
+			await enrichSelfReference(raw, linkedTableId, generation);
+			if (generation !== enrichGeneration) return;
+
+			const displayField = primaryDisplayField || fieldSchema?.primaryDisplay;
+
+			if (displayField) {
+				await loadMissingOptions(localValue, linkedTableId, displayField);
+			}
+		});
 	});
 
-	const handleKeyboard = (e) => {
-		if (e.key == 'Escape' && $editorState == 'Open') {
-			editorState.close();
-			return;
-		} else if (e.key == 'Escape') {
-			cellState.cancel();
-		} else if (e.keyCode == 32 && $cellState == 'Editing') {
-			editorState.toggle();
-		} else if (e.key == 'Tab' && $editorState == 'Open') {
-			cellState.focusout();
-		} else if ($editorState == 'Open') {
-			pickerApi?.focus();
-		}
-	};
+	$effect(() => {
+		if (!tableId || !writable) return;
 
-	const handleChange = (e) => {
-		localValue = e.detail;
+		untrack(() => {
+			const query = QueryUtils.buildQuery(filter);
+			optionsFetch = fetchData({
+				API,
+				datasource: {
+					type: datasourceType,
+					tableId
+				},
+				options: {
+					query,
+					limit: 1
+				}
+			});
+		});
+	});
 
-		if (singleSelect) {
-			editorState.close();
+	$effect(() => {
+		const definition = $optionsFetch?.definition;
+		if (!definition) return;
+		primaryDisplayField =
+			fieldSchema?.primaryDisplay ||
+			('primaryDisplay' in definition ? definition.primaryDisplay : undefined) ||
+			(isUser ? 'email' : undefined);
+	});
+
+	$effect(() => {
+		if (disabled) {
+			csm.goTo('disabled');
+		} else if (readonly && copyable && !isEmpty) {
+			csm.goTo('copyable');
+		} else if (readonly) {
+			csm.goTo('readonly');
+		} else {
+			csm.goTo('view');
 		}
 
-		if (config.debounced) {
-			dispatch('change', returnSingle && localValue ? localValue[0] : localValue);
+		tabindex = readonly || disabled ? -1 : 0;
+	});
+
+	$effect(() => {
+		if (autofocus) {
+			setTimeout(() => csm.focus(), 50);
 		}
-	};
+	});
 </script>
 
+<!-- svelte-ignore a11y_interactive_supports_focus -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<div
-	class="superCell has-popup"
-	tabindex={config?.disabled ? -1 : 0}
-	bind:this={anchor}
-	class:isDirty={isDirty && config.showDirty}
-	class:inEdit
-	class:inline={inline}
-	class:multirow
-	class:form={config.role == 'form'}
-	class:disabled={config.disabled}
-	class:readonly
-	class:open-popup={$editorState == 'Open'}
-	class:error={config.error}
-	style:color={config.color}
-	style:background={config.background}
-	on:focus={cellState.focus}
-	on:keydown|self={handleKeyboard}
-	on:focusout={cellState.focusout}
-	on:mousedown={cellState.toggle}
+<BaseCell
+	{id}
+	bind:anchor
+	{csm}
+	{role}
+	{error}
+	{icon}
+	{multirow}
+	isDirty={isDirty && showDirty}
+	popupOpen={open}
+	{copyIcon}
+	{tabindex}
 >
-	{#if config?.icon}
-		<i class={config.icon + ' field-icon'}></i>
-	{/if}
-
-	<div class="value" class:placeholder={(localValue?.length ?? 0) < 1}>
-		{#if simpleView}
-			<span>
-				{#if config.role == 'form' && localValue.length > 1}
-					({localValue.length})
-				{/if}
-				{localValue.map((v) => v.primaryDisplay).join(', ') || placeholder}
-			</span>
-		{:else}
-			<div
-				class="items"
-				class:pills
-				class:links
-				class:isUser
-				class:withCount={localValue.length > 5}
-				class:inEdit
-			>
-				{#each localValue as val, idx (val)}
-					{#if idx < 5}
+	{#key $csm}
+		<span class="value" class:placeholder={isEmpty}>
+			<div class="value-content" use:tooltip>
+				{#key localValue}
+					{#if isEmpty}
+						{placeholder || 'Select...'}
+					{:else if plaintext}
+						{#if role === 'form' && localValue.length > 1}
+							({localValue.length})
+						{/if}
+						{localValue.map((item) => item.primaryDisplay).join(', ')}
+					{:else}
 						<div
-							class="item"
-							on:click={links
-								? () => {
-										dispatch('linkClick', val);
-									}
-								: null}
+							class="items"
+							class:pills
+							class:links
+							class:isUser
+							class:withCount={localValue.length > 5}
 						>
-							{#if isUser}
-								<i class={valueIcon}></i>
+							{#each localValue as val, idx (val._id)}
+								{#if idx < 5}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="item"
+										on:click={links
+											? () => {
+													dispatch('linkClick', val);
+												}
+											: null}
+									>
+										{#if isUser}
+											<i class={valueIcon}></i>
+										{/if}
+										<span>{val.primaryDisplay}</span>
+									</div>
+								{/if}
+							{/each}
+
+							{#if localValue.length > 5}
+								<span class="count">(+ {localValue.length - 5})</span>
 							{/if}
-							<span>{val.primaryDisplay}</span>
 						</div>
 					{/if}
-				{/each}
-
-				{#if localValue.length == 0}
-					<span>{placeholder}</span>
-				{/if}
-
-				{#if localValue.length > 5}
-					<span class="count">
-						(+ {localValue.length - 5})
-					</span>
-				{/if}
+				{/key}
 			</div>
-		{/if}
-	</div>
-	{#if !readonly && (config.role == 'form' || inEdit)}
-		<i class="ph ph-caret-down control-icon"></i>
-	{/if}
-</div>
+		</span>
 
-{#if inEdit}
-	<SuperPopover {anchor} useAnchorWidth open={$editorState == 'Open'}>
-		{#snippet children()}
+		{#if !readonly && ($csm === 'view' || $csm === 'editing')}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<!-- svelte-ignore event_directive_deprecated -->
-			<div
-				class="picker-container"
-				bind:this={popup}
-				on:keydown={(e) => {
-					if (e.key == 'Escape' || e.key == 'Tab') {
-						anchor?.focus();
-						editorState.close();
-						e.preventDefault();
-					}
-				}}
-			>
-				{#if fieldSchema?.recursiveTable}
-					<CellLinkPickerTree
-						{fieldSchema}
-						filter={filter ?? []}
-						search={config.search}
-						{limit}
-						joinColumn={config.joinColumn}
-						value={localValue}
-						{ownId}
-						multi={fieldSchema.relationshipType == 'many-to-many' ||
-							fieldSchema.relationshipType == 'many-to-one'}
-						on:change={handleChange}
-					/>
-				{:else}
-					<CellLinkPickerSelect
-						bind:api={pickerApi}
-						{fieldSchema}
-						filter={filter ?? []}
-						{singleSelect}
-						value={localValue}
-						wide={config.wide && !singleSelect}
-						on:change={handleChange}
-						on:focusout={cellState.popupfocusout}
-					/>
-				{/if}
-			</div>
-		{/snippet}
-	</SuperPopover>
-{/if}
+			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
+		{/if}
+	{/key}
+</BaseCell>
+
+<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
+	{#if $csm === 'editing'}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="picker-container"
+			bind:this={picker}
+			on:keydown={(e) => {
+				if (e.key === 'Escape' || e.key === 'Tab') {
+					anchor?.focus();
+					open = false;
+					e.preventDefault();
+				}
+			}}
+		>
+			{#if fieldSchema?.recursiveTable}
+				<CellLinkPickerTree
+					{fieldSchema}
+					{filter}
+					search={config.search}
+					{limit}
+					joinColumn={config.joinColumn}
+					value={localValue}
+					{ownId}
+					multi={fieldSchema.relationshipType === 'many-to-many' ||
+						fieldSchema.relationshipType === 'many-to-one'}
+					on:change={handlePickerChange}
+				/>
+			{:else}
+				<CellLinkPickerSelect
+					bind:api={pickerApi}
+					{fieldSchema}
+					{filter}
+					{singleSelect}
+					value={localValue}
+					wide={config.wide && !singleSelect}
+					on:change={handlePickerChange}
+					on:focusout={csm.popupfocusout}
+				/>
+			{/if}
+		</div>
+	{/if}
+</SuperPopover>
+
+<style>
+	span.value {
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: stretch;
+		height: 100%;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
+		cursor: inherit;
+		padding: 0.25rem 0.75rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	span.value:has(.items) {
+		white-space: normal;
+	}
+
+	.value-content {
+		min-width: 0;
+		flex: 1;
+		font-style: inherit;
+		font-size: 13px;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+		display: flex;
+		align-items: center;
+	}
+
+	.value-content:has(.items) {
+		white-space: normal;
+		display: flex;
+	}
+
+	.value.placeholder .value-content {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
+	}
+
+	.items {
+		flex: auto;
+		display: flex;
+		overflow: hidden;
+		align-items: stretch;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.item {
+		display: flex;
+		align-items: center;
+		overflow: hidden;
+		min-width: 0;
+		gap: 0.35rem;
+		padding: 0rem 0.5rem;
+	}
+
+	.item span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.items.pills .item {
+		background-color: var(--spectrum-global-color-gray-100);
+		border: 1px solid var(--spectrum-global-color-gray-200);
+		border-radius: 4px;
+		align-self: stretch;
+		padding: 0.25rem 0.5rem;
+		font-size: 12px;
+	}
+
+	.items.links .item {
+		cursor: pointer;
+		color: var(--spectrum-global-color-blue-600);
+	}
+
+	.items.links .item:hover {
+		text-decoration: underline;
+	}
+
+	.count {
+		color: var(--spectrum-global-color-gray-600);
+		font-size: 12px;
+		align-self: center;
+	}
+
+	.picker-container {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+</style>

@@ -1,69 +1,34 @@
-<script>
-	import { getContext, createEventDispatcher } from 'svelte';
+<script lang="ts">
+	import { getContext, untrack } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
+	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import { OPTIONS_COLORS_ARRAY } from './optionsColors';
-	import './CellCommon.css';
+	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
 	const dispatch = createEventDispatcher();
-	const { API, QueryUtils, fetchData, memo, derivedMemo } = getContext('sdk');
+	const { API, QueryUtils, fetchData } = getContext('sdk');
 
-	let { cellOptions, value, autofocus = false } = $props();
+	let { id, cellOptions, value, autofocus = false } = $props();
 
-	let anchor = $state();
-	let editor = $state();
-	let picker = $state();
-	let searchInput = $state();
-	let options = memo([]);
-	let optionColors = $state({});
-	let filteredOptions = $state([]);
+	let anchor = $state<HTMLElement | null>(null);
+	let editor = $state<HTMLElement | null>(null);
+	let picker = $state<HTMLElement | null>(null);
+	let searchInput = $state<HTMLInputElement | null>(null);
+	let options = $state<string[]>([]);
+	let filteredOptions = $state<string[]>([]);
 	let focusedOptionIdx = $state(-1);
-	let timer = $state();
+	let timer = $state<ReturnType<typeof setTimeout>>();
 	let initLimit = $state(30);
 	let isInitialLoad = $state(true);
 	let isFetchMore = $state(false);
-	let localValue = $state([]);
-	let newTag = $state();
+	let localValue = $state<string[]>([]);
+	let newTag = $state<string | null>(null);
 	let searchTerm = $state('');
-	let search = $state(false);
-
-	const addUniqueTags = (tagsToAdd) => {
-		if (!tagsToAdd || !tagsToAdd.length) return;
-
-		const existingLower = new Set(
-			(localValue || []).map((t) =>
-				String(t || '')
-					.toLowerCase()
-					.trim()
-			)
-		);
-
-		const newTags = [];
-		tagsToAdd.forEach((tag) => {
-			const trimmedTag = String(tag || '').trim();
-			if (trimmedTag && !existingLower.has(trimmedTag.toLowerCase())) {
-				newTags.push(trimmedTag);
-				existingLower.add(trimmedTag.toLowerCase());
-			}
-		});
-
-		if (newTags.length) {
-			localValue = [...(localValue || []), ...newTags];
-			cellState.change();
-		}
-	};
-
-	const colors = derivedMemo(options, ($options) => {
-		let obj = {};
-		$options.forEach(
-			(option, index) =>
-				(obj[option] =
-					optionColors[option] ?? OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length])
-		);
-		return obj;
-	});
-
+	let open = $state(false);
 	let originalValue = $state('[]');
+	let fetch = $state<ReturnType<typeof fetchData>>();
 
 	let config = $derived(cellOptions ?? {});
 	let controlType = $derived(config.controlType);
@@ -74,389 +39,167 @@
 	let role = $derived(config.role);
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
+	let copyable = $derived(config.copyable);
+	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let error = $derived(config.error);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let placeholder = $derived(config.placeholder);
 	let showDirty = $derived(config.showDirty);
 	let align = $derived(config.align);
-
-	// svelte-ignore state_referenced_locally
-	const dataSourceStore = memo(config?.datasource ?? {});
-	let fetch = $state();
-
-	$effect(() => {
-		dataSourceStore.set(config.datasource);
-	});
-
-	$effect(() => {
-		if (config.suggestions) {
-			initLimit = 15;
-			isInitialLoad = true;
-			isFetchMore = false;
-		}
-	});
-
-	$effect(() => {
-		const query = QueryUtils.buildQuery(config.filter);
-		fetch?.update({
-			query,
-			limit: initLimit
-		});
-	});
-
-	$effect(() => {
-		if ($fetch) cellState.syncFetch($fetch);
-	});
-
-	$effect(() => {
-		cellState.loadDataOptions($fetch?.rows);
-	});
-
-	$effect(() => {
-		cellState.reset(value);
-	});
+	let datasource = $derived(config.datasource);
+	let filter = $derived(config.filter);
+	let debounceDelay = $derived(config.debounce);
 
 	let isEmpty = $derived(localValue.length < 1);
-	let inEdit = $derived($cellState == 'Editing');
+	let inEdit = $derived($csm === 'editing');
 	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
-	let open = $derived($editorState == 'Open');
+	let tabindex = $state(0);
 
-	export const cellState = fsm('Loading', {
-		'*': {
-			goTo(state) {
-				return state;
-			},
-			refresh() {
-				options.set([]);
-				return 'Loading';
-			},
-			loadDataOptions(rows) {
-				if (isFetchMore) {
-					if (rows && rows.length) {
-						const newOptions = rows.map((row) => row[valueColumn]);
-						options.set([...getOptionsSnapshot(), ...newOptions]);
-					}
-					isFetchMore = false;
-				} else {
-					const nextOptions = [];
-					if (rows && rows.length) {
-						rows.forEach((row) => {
-							nextOptions.push(row[valueColumn]);
-						});
-					}
-					options.set(nextOptions);
-				}
-				filteredOptions = getOptionsSnapshot();
-				if (isInitialLoad) isInitialLoad = false;
-			},
-			loadCustomOptions() {
-				const nextOptions = [];
-				if (customOptions?.length) {
-					customOptions.forEach((row) => {
-						nextOptions.push(row.value || row);
-					});
-				}
-				options.set(nextOptions);
-			},
-			clearFilters() {
-				filteredOptions = getOptionsSnapshot();
-			},
-			reset(newValue) {
-				localValue = [...(newValue || [])];
-				originalValue = JSON.stringify(localValue);
-			}
-		},
-		Loading: {
-			_enter() {
-				if (!suggestions || $fetch?.loaded) this.goTo.debounce(5, config.initialState || 'View');
-			},
-			_exit() {
-				if (config.suggestions) this.loadDataOptions($fetch?.rows);
-				else if (config.optionsSource == 'custom') this.loadCustomOptions();
-
-				filteredOptions = getOptionsSnapshot();
-			},
-			syncFetch(fetchState) {
-				if (fetchState?.loaded) {
-					return config.initialState || 'View';
-				}
-			}
-		},
-		View: {
-			_enter() {},
-			focus() {
-				if (!config.readonly && !config.disabled) {
-					return 'Editing';
-				}
-			}
-		},
-		Editing: {
-			_enter() {
-				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
-				this.clearFilters();
-				editorState.open();
-				dispatch('enteredit');
-			},
-			_exit() {
-				editorState.close();
-				dispatch('exitedit');
-			},
-			focus() {
-				anchor?.focus();
-			},
-			focusout(e) {
-				if (anchor?.contains(e.relatedTarget) || editor?.contains(e.relatedTarget)) {
-					return;
-				}
-				this.submit();
-			},
-			change() {
-				if (config.debounce) {
-					clearTimeout(timer);
-					timer = setTimeout(() => {
-						dispatch('change', localValue);
-					}, config.debounce);
-				}
-			},
-			submit() {
-				if (isDirty) {
-					dispatch('change', localValue);
-					return 'View';
-				}
-				this.cancel();
-			},
-			clear() {
-				localValue = [];
-				this.submit();
-			},
-			cancel() {
-				editorState.close();
-				localValue = JSON.parse(originalValue);
-				anchor?.blur();
-				return 'View';
-			}
-		}
-	});
-
-	let editorState = fsm('Closed', {
-		'*': {
-			close() {
-				return 'Closed';
-			},
-			toggleOption(idx) {
-				if (config.disabled || config.readonly) return;
-
-				if (typeof idx === 'string') {
-					let option = idx;
-					let pos = localValue.indexOf(option);
-					if (pos > -1) {
-						localValue.splice(pos, 1);
-						localValue = [...localValue];
-					} else {
-						addUniqueTags([option]);
-					}
-					cellState.change();
-					fetchMoreIfNeeded();
-				} else {
-					if (idx < 0) return;
-					let option = filteredOptions[idx];
-					let pos = localValue.indexOf(option);
-					if (pos > -1) {
-						localValue.splice(pos, 1);
-						localValue = [...localValue];
-					} else {
-						addUniqueTags([option]);
-					}
-					cellState.change();
-					fetchMoreIfNeeded();
-				}
-			}
-		},
-		Open: {
-			_enter() {
-				focusedOptionIdx = -1;
-				setTimeout(() => searchInput?.focus(), 0);
-				editorState.filterOptions(searchTerm);
-			},
-			_exit() {
-				if (newTag?.trim() && filteredOptions.length == 0) {
-					const tags = newTag
-						.split(',')
-						.map((tag) => tag.trim())
-						.filter((tag) => tag);
-					addUniqueTags(tags);
-				}
-				searchTerm = '';
-				newTag = null;
-			},
-			filterOptions(term) {
-				if (term) newTag = term.trim();
-				else newTag = null;
-
-				if (config.suggestions) {
-					let appliedFilter = [];
-					if (term) {
-						appliedFilter = [
-							...(config.filter || []),
-							{
-								field: valueColumn,
-								type: 'string',
-								operator: 'fuzzy',
-								value: term,
-								valueType: 'Value'
-							}
-						];
-					} else {
-						appliedFilter = config.filter || [];
-					}
-					isFetchMore = false;
-					fetch?.update({
-						query: QueryUtils.buildQuery(appliedFilter)
-					});
-					filteredOptions = getOptionsSnapshot();
-				} else {
-					if (term) {
-						filteredOptions = getOptionsSnapshot().filter((x) =>
-							x?.toLocaleLowerCase().startsWith(term.toLocaleLowerCase())
-						);
-					} else {
-						filteredOptions = getOptionsSnapshot();
-						search = false;
-					}
-				}
-			},
-			toggle() {
-				return 'Closed';
-			},
-			handleInputKeyboard(e) {
-				if (e.key == 'Enter') {
-					if (newTag?.trim()) {
-						const tags = newTag
-							.split(',')
-							.map((tag) => tag.trim())
-							.filter((tag) => tag);
-						addUniqueTags(tags);
-						newTag = null;
-						searchTerm = '';
-						setTimeout(() => searchInput?.focus(), 0);
-					}
-					e.preventDefault();
-					return;
-				}
-				if (e.key == ' ') {
-					if (focusedOptionIdx > -1) {
-						this.toggleOption(focusedOptionIdx);
-						e.preventDefault();
-					}
-				}
-				if (e.key == 'Tab') {
-					anchor?.focus();
-					editorState.close();
-					e.preventDefault();
-					return;
-				}
-				if (e.key == 'Escape') {
-					newTag = null;
-					editorState.close();
-					anchor?.focus();
-					e.preventDefault();
-					e.stopPropagation();
-					return;
-				}
-				if (e.key == 'ArrowDown') this.highlightNext(e.stopPropagation());
-				if (e.key == 'ArrowUp') this.highlightPrevious(e.preventDefault(), e.stopPropagation());
-				if (e.key == 'Escape') {
-					cellState.cancel();
-				}
-			},
-			handleKeyboard(e) {
-				if (e.keyCode == 32) {
-					if (focusedOptionIdx > -1) {
-						this.toggleOption(focusedOptionIdx);
-					} else if (!config.autocomplete) {
-						this.close(e.preventDefault());
-					}
-				}
-				if (e.key == 'Escape') {
-					cellState.cancel();
-				}
-				if (e.key == 'Enter' || e.key == 'Tab') {
-					if (focusedOptionIdx > -1 && filteredOptions[focusedOptionIdx])
-						this.toggleOption(focusedOptionIdx);
-				}
-				if (e.key == 'ArrowDown') this.highlightNext();
-				if (e.key == 'ArrowUp') this.highlightPrevious(e.preventDefault());
-				if (controlType != 'inputSelect') search = true;
-			},
-			highlightNext() {
-				focusedOptionIdx += 1;
-				if (focusedOptionIdx > filteredOptions.length - 1) focusedOptionIdx = 0;
-			},
-			highlightPrevious() {
-				focusedOptionIdx -= 1;
-				if (focusedOptionIdx < 0) focusedOptionIdx = filteredOptions.length - 1;
-			}
-		},
-		Closed: {
-			toggle() {
-				return 'Open';
-			},
-			open() {
-				return 'Open';
-			},
-			highlightNext() {
-				this.open();
-				focusedOptionIdx = 0;
-			},
-			handleInputKeyboard(e) {
-				if (e.key == 'Escape') cellState.cancel();
-				if (e.key != 'Tab') {
-					this.open();
-					focusedOptionIdx = 0;
-				}
-			},
-			handleKeyboard(e) {
-				if (e.key == 'Escape') cellState.cancel();
-				if (controlType == 'select' && e.key != 'Tab') {
-					search = true;
-					if (e.key == 'ArrowDown' || e.keyCode == 32) this.toggle();
-					if (e.key == 'Backspace' || e.key == 'Delete') {
-						localValue = [];
-						cellState.change();
-					}
-				}
-			}
-		}
-	});
-
-	let optionsSnapshot = $state([]);
-
-	$effect(() => {
-		const unsubscribe = options.subscribe((next) => {
-			optionsSnapshot = next;
+	let tagColors = $derived.by(() => {
+		const colors: Record<string, string> = {};
+		options.forEach((option, index) => {
+			colors[option] = OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length];
 		});
-		return unsubscribe;
+		localValue.forEach((tag, index) => {
+			if (!colors[tag]) {
+				colors[tag] = OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length];
+			}
+		});
+		return colors;
 	});
 
-	const getOptionsSnapshot = () => optionsSnapshot;
+	const getCopyText = () => localValue.join(', ');
+
+	const emitChange = (immediate = false) => {
+		if (!debounceDelay || immediate) {
+			dispatch('change', [...localValue]);
+			dispatch('labelChange', getCopyText() || null);
+			return;
+		}
+
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			dispatch('change', [...localValue]);
+			dispatch('labelChange', getCopyText() || null);
+		}, debounceDelay);
+	};
+
+	const addUniqueTags = (tagsToAdd: string[]) => {
+		if (!tagsToAdd?.length) return;
+
+		const existingLower = new Set(
+			localValue.map((tag) =>
+				String(tag || '')
+					.toLowerCase()
+					.trim()
+			)
+		);
+
+		const newTags: string[] = [];
+		tagsToAdd.forEach((tag) => {
+			const trimmedTag = String(tag || '').trim();
+			if (trimmedTag && !existingLower.has(trimmedTag.toLowerCase())) {
+				newTags.push(trimmedTag);
+				existingLower.add(trimmedTag.toLowerCase());
+			}
+		});
+
+		if (newTags.length) {
+			localValue = [...localValue, ...newTags];
+			emitChange();
+		}
+	};
+
+	const loadOptionsFromRows = (rows: Record<string, unknown>[] | undefined) => {
+		if (isFetchMore) {
+			if (rows?.length) {
+				const newOptions = rows.map((row) => String(row[valueColumn]));
+				options = [...options, ...newOptions];
+			}
+			isFetchMore = false;
+		} else {
+			options = rows?.length ? rows.map((row) => String(row[valueColumn])) : [];
+		}
+
+		filteredOptions = [...options];
+		if (isInitialLoad) isInitialLoad = false;
+	};
+
+	const loadCustomOptions = () => {
+		options =
+			customOptions?.map((row: { value?: string } | string) =>
+				typeof row === 'object' ? String(row.value ?? '') : String(row)
+			) ?? [];
+		filteredOptions = [...options];
+	};
+
+	const toggleOption = (optionOrIdx: string | number) => {
+		if (disabled || readonly) return;
+
+		const option =
+			typeof optionOrIdx === 'number' ? filteredOptions[optionOrIdx] : optionOrIdx;
+		if (!option) return;
+
+		const pos = localValue.indexOf(option);
+		if (pos > -1) {
+			localValue = localValue.filter((_, index) => index !== pos);
+		} else {
+			addUniqueTags([option]);
+			return;
+		}
+
+		emitChange();
+		fetchMoreIfNeeded();
+	};
+
+	const filterOptions = (term: string) => {
+		searchTerm = term;
+		newTag = term.trim() || null;
+
+		if (suggestions) {
+			const appliedFilter = term
+				? [
+						...(filter || []),
+						{
+							field: valueColumn,
+							type: 'string',
+							operator: 'fuzzy',
+							value: term,
+							valueType: 'Value'
+						}
+					]
+				: filter || [];
+
+			isFetchMore = false;
+			fetch?.update({
+				query: QueryUtils.buildQuery(appliedFilter)
+			});
+			filteredOptions = [...options];
+			return;
+		}
+
+		if (term) {
+			filteredOptions = options.filter((option) =>
+				option.toLocaleLowerCase().startsWith(term.toLocaleLowerCase())
+			);
+		} else {
+			filteredOptions = [...options];
+		}
+	};
 
 	const fetchMore = () => {
 		if ($fetch?.loading) return;
 		if (($fetch?.rows?.length ?? 0) < initLimit) return;
 		isFetchMore = true;
 		initLimit += 100;
-		fetch?.update({
-			limit: initLimit
-		});
+		fetch?.update({ limit: initLimit });
 	};
 
 	const fetchMoreIfNeeded = () => {
-		const visibleOptions = filteredOptions.filter((option) => !localValue?.includes(option));
-		const minVisibleThreshold = 10;
-
+		const visibleOptions = filteredOptions.filter((option) => !localValue.includes(option));
 		if (
-			visibleOptions.length < minVisibleThreshold &&
+			visibleOptions.length < 10 &&
 			!$fetch?.loading &&
 			($fetch?.rows?.length ?? 0) >= initLimit
 		) {
@@ -464,53 +207,255 @@
 		}
 	};
 
-	const handleScroll = (e) => {
-		const element = e.target;
-		const scrollTop = element.scrollTop;
-		const scrollHeight = element.scrollHeight;
-		const clientHeight = element.clientHeight;
-
-		if (scrollTop + clientHeight >= scrollHeight - 50) {
+	const handleScroll = (e: Event) => {
+		const element = e.target as HTMLElement;
+		if (element.scrollTop + element.clientHeight >= element.scrollHeight - 50) {
 			fetchMore();
 		}
 	};
 
-	const createFetch = (datasource) => {
-		if (!suggestions) return;
-
-		return fetchData({
-			API,
-			datasource,
-			options: {
-				limit: initLimit
-			}
-		});
+	const openPicker = () => {
+		open = true;
+		focusedOptionIdx = -1;
+		setTimeout(() => {
+			searchInput?.focus();
+			filterOptions(searchTerm);
+		}, 0);
 	};
 
-	$effect(() => {
-		fetch = createFetch(dataSourceStoreSnapshot);
+	const closePicker = () => {
+		if (newTag?.trim() && filteredOptions.length === 0) {
+			addUniqueTags(
+				newTag
+					.split(',')
+					.map((tag) => tag.trim())
+					.filter(Boolean)
+			);
+		}
+		searchTerm = '';
+		newTag = null;
+		open = false;
+	};
+
+	const handleInputKeyboard = (e: KeyboardEvent) => {
+		if (e.key === 'Enter') {
+			if (newTag?.trim()) {
+				addUniqueTags(
+					newTag
+						.split(',')
+						.map((tag) => tag.trim())
+						.filter(Boolean)
+				);
+				newTag = null;
+				searchTerm = '';
+				setTimeout(() => searchInput?.focus(), 0);
+			}
+			e.preventDefault();
+			return;
+		}
+
+		if (e.key === ' ') {
+			if (focusedOptionIdx > -1) {
+				toggleOption(focusedOptionIdx);
+				e.preventDefault();
+			}
+			return;
+		}
+
+		if (e.key === 'Tab') {
+			anchor?.focus();
+			closePicker();
+			e.preventDefault();
+			return;
+		}
+
+		if (e.key === 'Escape') {
+			newTag = null;
+			closePicker();
+			anchor?.focus();
+			e.preventDefault();
+			e.stopPropagation();
+			return;
+		}
+
+		if (e.key === 'ArrowDown') {
+			focusedOptionIdx = Math.min(focusedOptionIdx + 1, filteredOptions.length - 1);
+			if (focusedOptionIdx < 0) focusedOptionIdx = 0;
+			e.stopPropagation();
+		}
+
+		if (e.key === 'ArrowUp') {
+			focusedOptionIdx = Math.max(focusedOptionIdx - 1, 0);
+			e.preventDefault();
+			e.stopPropagation();
+		}
+	};
+
+	const handleCellKeyboard = (e: KeyboardEvent) => {
+		if ($csm !== 'editing') return;
+
+		if (e.keyCode === 32) {
+			if (focusedOptionIdx > -1) {
+				toggleOption(focusedOptionIdx);
+			} else if (!open) {
+				openPicker();
+				e.preventDefault();
+			}
+		}
+
+		if (e.key === 'Escape') {
+			if (open) {
+				closePicker();
+			} else {
+				localValue = JSON.parse(originalValue);
+				anchor?.blur();
+				csm.goTo('view');
+			}
+		}
+
+		if (e.key === 'Enter' || e.key === 'Tab') {
+			if (focusedOptionIdx > -1 && filteredOptions[focusedOptionIdx]) {
+				toggleOption(focusedOptionIdx);
+			}
+		}
+
+		if (e.key === 'ArrowDown' && !open) {
+			openPicker();
+			focusedOptionIdx = 0;
+		}
+
+		if (e.key === 'ArrowUp' && open) {
+			focusedOptionIdx = Math.max(focusedOptionIdx - 1, 0);
+			e.preventDefault();
+		}
+
+		if (controlType === 'select' && e.key === 'Backspace' && !open) {
+			localValue = [];
+			emitChange();
+		}
+	};
+
+	const csm = fsm('view', {
+		'*': {
+			goTo: (state: string) => state
+		},
+		view: {
+			focus: () => {
+				if (!readonly && !disabled) return 'editing';
+			}
+		},
+		editing: {
+			_enter: () => {
+				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
+				dispatch('enteredit');
+			},
+			_exit: () => {
+				closePicker();
+				dispatch('exitedit');
+				if (isDirty) {
+					emitChange(true);
+				}
+			},
+			focusout: (e: FocusEvent) => {
+				const target = e.relatedTarget as Node | null;
+				if (
+					anchor?.contains(target) ||
+					editor?.contains(target) ||
+					picker?.contains(target) ||
+					searchInput?.contains(target as Node)
+				) {
+					return;
+				}
+				return 'view';
+			},
+			keydown: handleCellKeyboard
+		},
+		readonly: {},
+		disabled: {},
+		copyable: {
+			click() {
+				copyAndTransition(() => csm, getCopyText());
+			},
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
+			}
+		},
+		justCopied: deferJustCopied(() => csm)
 	});
 
-	let dataSourceStoreSnapshot = $state({});
+	$effect(() => {
+		const nextValue = Array.isArray(value) ? [...value] : value ? [value] : [];
+		localValue = nextValue;
+		originalValue = JSON.stringify(nextValue);
+	});
 
 	$effect(() => {
-		const unsubscribe = dataSourceStore.subscribe((next) => {
-			dataSourceStoreSnapshot = next;
+		if (suggestions) {
+			initLimit = 15;
+			isInitialLoad = true;
+			isFetchMore = false;
+		}
+	});
+
+	$effect(() => {
+		if (!suggestions || !datasource) return;
+
+		untrack(() => {
+			const query = QueryUtils.buildQuery(filter);
+			fetch = fetchData({
+				API,
+				datasource,
+				options: {
+					query,
+					limit: initLimit
+				}
+			});
 		});
-		return unsubscribe;
 	});
 
 	$effect(() => {
-		if (filteredOptions && suggestions && !$fetch?.loading) {
+		const query = QueryUtils.buildQuery(filter);
+		fetch?.update({ query, limit: initLimit });
+	});
+
+	$effect(() => {
+		if (suggestions) {
+			loadOptionsFromRows($fetch?.rows);
+		}
+	});
+
+	$effect(() => {
+		if (!suggestions && config.optionsSource === 'custom') {
+			loadCustomOptions();
+		}
+	});
+
+	$effect(() => {
+		if (filteredOptions.length && suggestions && !$fetch?.loading) {
 			setTimeout(() => fetchMoreIfNeeded(), 0);
 		}
 	});
 
 	$effect(() => {
+		if (disabled) {
+			csm.goTo('disabled');
+		} else if (readonly && copyable && !isEmpty) {
+			csm.goTo('copyable');
+		} else if (readonly) {
+			csm.goTo('readonly');
+		} else {
+			csm.goTo('view');
+		}
+
+		tabindex = readonly || disabled ? -1 : 0;
+	});
+
+	$effect(() => {
 		if (autofocus) {
-			setTimeout(() => {
-				cellState.focus();
-			}, 30);
+			setTimeout(() => csm.focus(), 30);
 		}
 
 		return () => {
@@ -520,155 +465,149 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore event_directive_deprecated -->
-<div
-	bind:this={anchor}
-	class="superCell"
-	tabindex={config?.disabled ? -1 : 0}
-	class:isDirty={isDirty && showDirty}
-	class:inEdit
-	class:disabled
-	class:readonly
-	class:error
-	class:multirow={true}
-	style:color
-	style:background
-	class:inline={role == 'inline'}
-	class:form={role == 'form'}
-	on:focusin={cellState.focus}
-	on:focusout={cellState.focusout}
-	on:keydown={editorState.handleKeyboard}
+<BaseCell
+	{id}
+	bind:anchor
+	{csm}
+	{role}
+	{error}
+	{copyIcon}
+	multirow={true}
+	isDirty={isDirty && showDirty}
+	popupOpen={open}
+	{color}
+	{background}
+	{tabindex}
 >
-	<div class="value" class:placeholder={isEmpty} tabindex="-1">
+	<div class="value" class:placeholder={isEmpty && !inEdit}>
 		{#if isEmpty && !inEdit}
-			<span>{placeholder || 'Add some Tags'}</span>
+			<span class="placeholder-text">{placeholder || 'Add some Tags'}</span>
 		{/if}
 
-		<div
-			class="tags"
-			style:justify-content={align ?? 'flex-start'}
-			style:flex-wrap={'wrap'}
-			tabindex="-1"
-		>
-			{#if localValue.length}
-				{#each localValue as tag, idx (tag)}
-					<div
-						class="tag"
-						style:--option-color={$colors[tag] ||
-							OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
-					>
-						<span class="tag-wrap">
-							<span> {tag} </span>
-						</span>
-						{#if inEdit}
-							<i
-								class="ph ph-x"
-								style:font-size={'12px'}
-								style:z-index={2}
-								on:mousedown|preventDefault|stopPropagation={() => editorState.toggleOption(tag)}
-							></i>
-						{/if}
-					</div>
-				{/each}
-			{/if}
+		<div class="tags" style:justify-content={align ?? 'flex-start'}>
+			{#each localValue as tag, idx (tag)}
+				<div
+					class="tag"
+					style:--option-color={tagColors[tag] ||
+						OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
+				>
+					<span class="tag-wrap">
+						<span>{tag}</span>
+					</span>
+					{#if inEdit}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<i
+							class="ph ph-x remove-icon"
+							on:mousedown|preventDefault|stopPropagation={() => toggleOption(tag)}
+						></i>
+					{/if}
+				</div>
+			{/each}
 
 			{#if inEdit}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<i
-					class="ph ph-plus actionIcon"
-					on:mouseup|preventDefault|stopPropagation={editorState.toggle}
+					class="ph ph-plus action-icon"
+					on:mousedown|preventDefault|stopPropagation={() => (open ? closePicker() : openPicker())}
 				></i>
 			{/if}
 		</div>
 	</div>
-</div>
+</BaseCell>
 
 {#if inEdit}
 	<!-- svelte-ignore event_directive_deprecated -->
-	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} on:close={cellState.focusout}>
-		{#snippet children()}
-			<div bind:this={editor} class="editor" tabindex="-1">
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore event_directive_deprecated -->
-		<div class="searchControl" on:keydown={editorState.handleInputKeyboard}>
-			<i
-				class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
-				class:actionIcon={true}
-			></i>
-			<!-- svelte-ignore event_directive_deprecated -->
-			<input
-				type="text"
-				placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
-				class="searchInput"
-				bind:value={searchTerm}
-				bind:this={searchInput}
-				on:input={(e) => editorState.filterOptions(e.target.value)}
-				on:focusout={cellState.focusout}
-			/>
-		</div>
-
-		{#if suggestions}
+	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} dismissible={false}>
+		<div bind:this={editor} class="editor">
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore event_directive_deprecated -->
-			<div
-				bind:this={picker}
-				class="options"
-				on:wheel={(e) => e.stopPropagation()}
-				on:mouseleave={() => (focusedOptionIdx = -1)}
-				on:scroll={suggestions ? handleScroll : null}
-				on:mousedown|preventDefault|stopPropagation
-			>
-				{#if $fetch?.loading && !$fetch?.rows?.length}
-					<div class="option loading">
-						<i class="ph ph-spinner spin"></i>
-						Loading...
-					</div>
-				{:else if filteredOptions?.length}
-					{#each filteredOptions as option, idx (idx)}
-						{#if !localValue?.includes(option)}
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<!-- svelte-ignore event_directive_deprecated -->
-							<div
-								class="option"
-								class:text={optionsViewMode == 'text'}
-								class:focused={focusedOptionIdx === idx}
-								style:--option-color={$colors[option]}
-								on:mousedown|preventDefault={() => editorState.toggleOption(idx)}
-								on:mouseenter={() => (focusedOptionIdx = idx)}
-							>
-								<span>
-									{#if optionsViewMode !== 'text'}
-										<i class="ri-checkbox-blank-fill"></i>
-									{/if}
-									{option}
-								</span>
-							</div>
-						{/if}
-					{/each}
-					{#if $fetch?.loading}
+			<div class="search-control" on:keydown={handleInputKeyboard}>
+				<i
+					class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
+					class:action-icon={true}
+				></i>
+				<input
+					type="text"
+					placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
+					class="search-input"
+					bind:value={searchTerm}
+					bind:this={searchInput}
+					on:input={(e) => filterOptions((e.target as HTMLInputElement).value)}
+					on:focusout={csm.focusout}
+				/>
+			</div>
+
+			{#if suggestions}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<!-- svelte-ignore event_directive_deprecated -->
+				<div
+					bind:this={picker}
+					class="options"
+					on:wheel={(e) => e.stopPropagation()}
+					on:mouseleave={() => (focusedOptionIdx = -1)}
+					on:scroll={handleScroll}
+					on:mousedown|preventDefault|stopPropagation
+				>
+					{#if $fetch?.loading && !$fetch?.rows?.length}
 						<div class="option loading">
 							<i class="ph ph-spinner spin"></i>
-							Loading more...
+							Loading...
+						</div>
+					{:else if filteredOptions.length}
+						{#each filteredOptions as option, idx (option)}
+							{#if !localValue.includes(option)}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="option"
+									class:text={optionsViewMode === 'text'}
+									class:focused={focusedOptionIdx === idx}
+									style:--option-color={tagColors[option]}
+									on:mousedown|preventDefault={() => toggleOption(idx)}
+									on:mouseenter={() => (focusedOptionIdx = idx)}
+								>
+									<span>
+										{#if optionsViewMode !== 'text'}
+											<i class="ri-checkbox-blank-fill"></i>
+										{/if}
+										{option}
+									</span>
+								</div>
+							{/if}
+						{/each}
+						{#if $fetch?.loading}
+							<div class="option loading">
+								<i class="ph ph-spinner spin"></i>
+								Loading more...
+							</div>
+						{/if}
+					{:else}
+						<div class="option not-found">
+							<span>
+								<i class="ri-close-line"></i>
+								No matches found, Tag will be added as new
+							</span>
 						</div>
 					{/if}
-				{:else}
-					<div class="option not-found">
-						<span>
-							<i class="ri-close-line"></i>
-							No matches found, Tag will be added as new
-						</span>
-					</div>
-				{/if}
-			</div>
-		{/if}
-			</div>
-		{/snippet}
+				</div>
+			{/if}
+		</div>
 	</SuperPopover>
 {/if}
 
 <style>
+	.value {
+		flex: 1 1 auto;
+		min-width: 0;
+		padding: 0.25rem 0.75rem;
+		outline: none;
+	}
+
+	.value.placeholder .placeholder-text {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic;
+	}
+
 	.tags {
 		display: flex;
 		align-items: center;
@@ -700,7 +639,7 @@
 		filter: brightness(0.9);
 	}
 
-	.tag:hover > i {
+	.tag:hover > .remove-icon {
 		display: block;
 		cursor: pointer;
 	}
@@ -711,20 +650,22 @@
 		white-space: nowrap;
 	}
 
-	.tag > i {
+	.remove-icon {
 		display: none;
+		font-size: 12px;
+		z-index: 2;
 		cursor: pointer;
 		transition: all 0.2s ease-in-out;
 	}
 
-	.searchControl {
+	.search-control {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0rem 0.5rem;
 	}
 
-	.searchControl:focus-within > .actionIcon {
+	.search-control:focus-within > .action-icon {
 		color: var(--spectrum-global-color-blue-600);
 		font-weight: 800;
 	}
@@ -734,6 +675,7 @@
 		flex-direction: column;
 		align-items: stretch;
 		overflow-y: auto;
+		max-height: 200px;
 		color: var(--spectrum-global-color-gray-700);
 		border-top: 1px solid var(--spectrum-global-color-gray-200);
 	}
@@ -747,21 +689,21 @@
 		padding: 0 0.5rem;
 	}
 
-	.option:hover {
+	.option:hover,
+	.option.focused {
 		background-color: var(--spectrum-global-color-gray-75);
 		cursor: pointer;
 	}
 
 	.option.focused {
-		background-color: var(--spectrum-global-color-gray-75);
 		color: var(--spectrum-global-color-gray-800);
 	}
 
-	.option.not-found {
+	.option.not-found,
+	.option.loading {
 		justify-content: center;
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic;
-		height: 2rem;
 	}
 
 	.option > span {
@@ -778,14 +720,7 @@
 		color: var(--option-color, var(--spectrum-global-color-gray-300));
 	}
 
-	.option.loading {
-		justify-content: center;
-		color: var(--spectrum-global-color-gray-500);
-		font-style: italic;
-	}
-
-	.actionIcon {
-		height: 100%;
+	.action-icon {
 		display: flex;
 		justify-content: center;
 		align-items: center;
@@ -793,13 +728,13 @@
 		color: var(--spectrum-global-color-gray-600);
 	}
 
-	.actionIcon:hover {
+	.action-icon:hover {
 		cursor: pointer;
 		color: var(--spectrum-global-color-blue-600);
 		font-weight: 800;
 	}
 
-	.searchInput {
+	.search-input {
 		width: 100%;
 		background: inherit;
 		font: inherit;
@@ -808,9 +743,5 @@
 		outline: none;
 		padding: 0.5rem;
 		box-sizing: border-box;
-	}
-
-	.value {
-		outline: none;
 	}
 </style>

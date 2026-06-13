@@ -7,6 +7,7 @@ export { default as BooleanCell } from './BooleanCell.svelte';
 export { default as DatetimeCell } from './DatetimeCell.svelte';
 export { default as DatetimeRangeCell } from './DatetimeRangeCell.svelte';
 export { default as CellTags } from './CellTags.svelte';
+export { default as CellArray } from './CellArray.svelte';
 export { default as CellLink } from './CellLink.svelte';
 export { default as CellLinkPickerSelect } from './CellLinkPickerSelect.svelte';
 export { default as CellLinkPickerTree } from './CellLinkPickerTree.svelte';

@@ -2,7 +2,7 @@
 	import { getContext, createEventDispatcher } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-	const { API, fetchData } = getContext('sdk');
+	const { API, fetchData, QueryUtils } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -28,6 +28,7 @@
 	let isInitialLoad = $state(true);
 
 	let fetch = $state();
+	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
 
 	$effect(() => {
 		fetch = fetchData({
@@ -37,7 +38,7 @@
 				tableId: tableId
 			},
 			options: {
-				filter,
+				query: defaultQuery,
 				limit: 15
 			}
 		});
@@ -102,7 +103,7 @@
 		}
 
 		fetch?.update({
-			filter: appliedFilter
+			query: QueryUtils.buildQuery(appliedFilter)
 		});
 	};
 

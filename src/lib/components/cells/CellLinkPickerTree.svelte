@@ -3,7 +3,7 @@
 	import SuperTree from '../SuperTree/SuperTree.svelte';
 	import StringCell from './StringCell.svelte';
 
-	const { API, fetchData, notificationStore } = getContext('sdk');
+	const { API, fetchData, QueryUtils, notificationStore } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -33,6 +33,7 @@
 	});
 
 	let fetch = $state();
+	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
 
 	$effect(() => {
 		fetch = fetchData({
@@ -44,7 +45,7 @@
 			options: {
 				sortOrder,
 				sortColumn,
-				filter,
+				query: defaultQuery,
 				limit
 			}
 		});
@@ -161,7 +162,7 @@
 		}
 
 		fetch?.update({
-			filter: appliedFilter
+			query: QueryUtils.buildQuery(appliedFilter)
 		});
 	};
 </script>
