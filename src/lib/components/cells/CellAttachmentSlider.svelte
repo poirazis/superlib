@@ -28,11 +28,13 @@
 	}>('sdk');
 
 	let {
+		id,
 		value,
 		cellOptions = {},
 		fieldSchema,
 		tableid,
 		API = sdk?.API,
+		autofocus = false,
 		inBuilder = false,
 		children
 	} = $props();
@@ -149,7 +151,7 @@
 		}
 	};
 
-	export const cellState = fsm('editing', {
+	const csm = fsm('editing', {
 		'*': {
 			goTo(state: string) {
 				return state;
@@ -167,7 +169,7 @@
 		copyable: {
 			_enter() {},
 			click() {
-				copyAndTransition(() => cellState, attachmentCopyText(localvalue));
+				copyAndTransition(() => csm, attachmentCopyText(localvalue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -176,7 +178,7 @@
 				}
 			}
 		},
-		justCopied: deferJustCopied(() => cellState),
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {}
 		},
@@ -209,24 +211,33 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && localvalue.length) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else if (baseRole === 'inline') {
-			cellState.goTo('view');
+			csm.goTo('view');
 		} else {
-			cellState.goTo('editing');
+			csm.goTo('editing');
+		}
+	});
+
+	$effect(() => {
+		if (autofocus) {
+			setTimeout(() => {
+				csm.focus();
+			}, 30);
 		}
 	});
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
 <BaseCell
+	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
+	{csm}
+	bind:anchor
 	multirow
 	{copyIcon}
 	{color}

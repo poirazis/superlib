@@ -94,7 +94,7 @@
 		emitChange(next);
 	};
 
-	export const cellState = fsm('view', {
+	const csm = fsm('view', {
 		'*': {
 			goTo(state: string) {
 				return state;
@@ -118,7 +118,7 @@
 				open = false;
 			},
 			click() {
-				copyAndTransition(() => cellState, attachmentCopyText(localvalue));
+				copyAndTransition(() => csm, attachmentCopyText(localvalue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -127,7 +127,7 @@
 				}
 			}
 		},
-		justCopied: deferJustCopied(() => cellState),
+		justCopied: deferJustCopied(() => csm),
 		disabled: {
 			_enter() {
 				open = false;
@@ -191,7 +191,7 @@
 		}
 	});
 
-	let inEdit = $derived($cellState === 'editing');
+	let inEdit = $derived($csm === 'editing');
 
 	$effect(() => {
 		localvalue = normalizeAttachments(value, multi);
@@ -199,23 +199,23 @@
 
 	$effect(() => {
 		if (disabled) {
-			cellState.goTo('disabled');
+			csm.goTo('disabled');
 		} else if (readonly && copyable && localvalue.length) {
-			cellState.goTo('copyable');
+			csm.goTo('copyable');
 		} else if (readonly) {
-			cellState.goTo('readonly');
+			csm.goTo('readonly');
 		} else if (baseRole === 'inline') {
-			cellState.goTo('view');
+			csm.goTo('view');
 		} else {
-			cellState.goTo('editing');
+			csm.goTo('editing');
 		}
 	});
 
 	$effect(() => {
 		if (autofocus) {
 			setTimeout(() => {
-				cellState.focus();
-				cellState.click?.();
+				csm.focus();
+				csm.click?.();
 			}, 30);
 		}
 	});
@@ -225,8 +225,8 @@
 <BaseCell
 	{id}
 	role={baseRole}
-	state={cellState}
-	bind:root={anchor}
+	{csm}
+	bind:anchor
 	{icon}
 	isDirty={isDirty && showDirty}
 	clearable={false}
@@ -237,10 +237,6 @@
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if icon}
-		<i class={icon + ' field-icon'} class:with-error={error}></i>
-	{/if}
-
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="attachment-display" class:placeholder={showPlaceholder}>
@@ -275,7 +271,7 @@
 		{open}
 		maxHeight={350}
 		useAnchorWidth
-		on:close={cellState.focusout}
+		on:close={csm.focusout}
 	>
 		{#snippet children()}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
