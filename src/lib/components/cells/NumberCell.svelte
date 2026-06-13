@@ -4,7 +4,7 @@
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import { tooltip } from '../../actions/tooltip';
-	import CellNumberStepper from './CellNumberStepper.svelte';
+	import NumberStepper from './NumberStepper.svelte';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -378,7 +378,7 @@
 		/>
 
 		{#if showStepper}
-			<CellNumberStepper
+			<NumberStepper
 				onIncrement={(e) => csm.increment(e)}
 				onDecrement={(e) => csm.decrement(e)}
 			/>

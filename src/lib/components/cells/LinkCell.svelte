@@ -4,8 +4,8 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
-	import CellLinkPickerSelect from './CellLinkPickerSelect.svelte';
-	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
+	import LinkPickerSelect from './LinkPickerSelect.svelte';
+	import LinkPickerTree from './LinkPickerTree.svelte';
 	import { tooltip } from '../../actions/tooltip';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
@@ -458,7 +458,7 @@
 			}}
 		>
 			{#if fieldSchema?.recursiveTable}
-				<CellLinkPickerTree
+				<LinkPickerTree
 					{fieldSchema}
 					{filter}
 					search={config.search}
@@ -471,7 +471,7 @@
 					on:change={handlePickerChange}
 				/>
 			{:else}
-				<CellLinkPickerSelect
+				<LinkPickerSelect
 					bind:api={pickerApi}
 					{fieldSchema}
 					{filter}

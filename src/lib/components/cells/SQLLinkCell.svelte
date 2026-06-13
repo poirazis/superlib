@@ -3,8 +3,8 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
-	import CellSQLLinkPicker from './CellSQLLinkPicker.svelte';
-	import CellLinkPickerTree from './CellLinkPickerTree.svelte';
+	import SQLLinkPicker from './SQLLinkPicker.svelte';
+	import LinkPickerTree from './LinkPickerTree.svelte';
 	import { tooltip } from '../../actions/tooltip';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 
@@ -385,7 +385,7 @@
 			}}
 		>
 			{#if fieldSchema?.recursiveTable}
-				<CellLinkPickerTree
+				<LinkPickerTree
 					{fieldSchema}
 					filter={resolvedFilter}
 					search={config.search}
@@ -397,7 +397,7 @@
 					on:change={handlePickerChange}
 				/>
 			{:else}
-				<CellSQLLinkPicker
+				<SQLLinkPicker
 					{fieldSchema}
 					filter={resolvedFilter}
 					{multi}
@@ -407,7 +407,7 @@
 					on:focusout={csm.popupfocusout}
 				>
 					{@render children?.()}
-				</CellSQLLinkPicker>
+				</SQLLinkPicker>
 			{/if}
 		</div>
 	</SuperPopover>
