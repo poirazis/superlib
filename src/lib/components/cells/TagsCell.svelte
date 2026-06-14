@@ -26,7 +26,6 @@
 	let isFetchMore = $state(false);
 	let localValue = $state<string[]>([]);
 	let filterTerm = $state('');
-	let open = $state(false);
 	let originalValue = $state('[]');
 	let fetch = $state<ReturnType<typeof fetchData>>();
 
@@ -57,6 +56,12 @@
 	let tabindex = $state(0);
 
 	let displayOptions = $derived(filteredOptions.filter((option) => !localValue.includes(option)));
+	let popupOpen = $derived(
+		suggestions &&
+			inEdit &&
+			filterTerm.trim().length > 0 &&
+			(displayOptions.length > 0 || !!$fetch?.loading)
+	);
 
 	let tagColors = $derived.by(() => {
 		const colors: Record<string, string> = {};
@@ -117,18 +122,6 @@
 		filterTerm = '';
 		if (editor) editor.value = '';
 		focusIdx = -1;
-		open = false;
-	};
-
-	const syncPopupState = (term: string) => {
-		if (!suggestions || !term.trim()) {
-			open = false;
-			focusIdx = -1;
-			return;
-		}
-
-		open = displayOptions.length > 0 || !!$fetch?.loading;
-		focusIdx = open && displayOptions.length ? 0 : -1;
 	};
 
 	const commitInput = () => {
@@ -150,17 +143,25 @@
 	};
 
 	const loadOptionsFromRows = (rows: Record<string, unknown>[] | undefined) => {
+		let next: string[];
+
 		if (isFetchMore) {
 			if (rows?.length) {
-				const newOptions = rows.map((row) => String(row[valueColumn]));
-				options = [...options, ...newOptions];
+				next = rows.map((row) => String(row[valueColumn]));
+				if (JSON.stringify(next) !== JSON.stringify(options)) {
+					options = next;
+					filteredOptions = [...next];
+				}
 			}
 			isFetchMore = false;
 		} else {
-			options = rows?.length ? rows.map((row) => String(row[valueColumn])) : [];
+			next = rows?.length ? rows.map((row) => String(row[valueColumn])) : [];
+			if (JSON.stringify(next) !== JSON.stringify(options)) {
+				options = next;
+				filteredOptions = [...next];
+			}
 		}
 
-		filteredOptions = [...options];
 		if (isInitialLoad) isInitialLoad = false;
 	};
 
@@ -222,7 +223,7 @@
 		if (suggestions) {
 			scheduleDataSearch(term);
 			filteredOptions = [...options];
-			syncPopupState(term);
+			focusIdx = term.trim() && displayOptions.length ? 0 : -1;
 			return;
 		}
 
@@ -233,8 +234,6 @@
 		} else {
 			filteredOptions = [...options];
 		}
-
-		syncPopupState(term);
 	};
 
 	const handleEditorInput = () => {
@@ -248,12 +247,6 @@
 		isFetchMore = true;
 		initLimit += 100;
 		fetch?.update({ limit: initLimit });
-	};
-
-	const fetchMoreIfNeeded = () => {
-		if (displayOptions.length < 10 && !$fetch?.loading && ($fetch?.rows?.length ?? 0) >= initLimit) {
-			fetchMore();
-		}
 	};
 
 	const handleScroll = (e: Event) => {
@@ -276,10 +269,9 @@
 		if (e.key === 'ArrowDown') {
 			if (!suggestions) return;
 			e.preventDefault();
-			if (!open) {
+			if (!popupOpen) {
 				const term = (editor?.value ?? filterTerm).trim();
 				if (!term) return;
-				open = opts.length > 0 || !!$fetch?.loading;
 				focusIdx = opts.length ? 0 : -1;
 				return;
 			}
@@ -290,7 +282,7 @@
 		}
 
 		if (e.key === 'ArrowUp') {
-			if (!suggestions || !open) return;
+			if (!suggestions || !popupOpen) return;
 			e.preventDefault();
 			focusIdx = Math.max(focusIdx - 1, 0);
 			scrollHighlightedIntoView();
@@ -305,8 +297,7 @@
 		}
 
 		if (e.key === 'Tab') {
-			if (open) {
-				open = false;
+			if (popupOpen) {
 				focusIdx = -1;
 			}
 			return;
@@ -315,8 +306,7 @@
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
-			if (open) {
-				open = false;
+			if (popupOpen) {
 				focusIdx = -1;
 				editor?.focus();
 			} else {
@@ -333,7 +323,7 @@
 			emitChange();
 		}
 
-		if (controlType === 'select' && e.key === 'Backspace' && !(editor?.value ?? filterTerm) && !open) {
+		if (controlType === 'select' && e.key === 'Backspace' && !(editor?.value ?? filterTerm) && !popupOpen) {
 			localValue = [];
 			emitChange();
 		}
@@ -378,7 +368,6 @@
 				if (e.key === 'Tab') {
 					e.preventDefault();
 					editor?.focus();
-					open = false;
 					focusIdx = -1;
 					return 'view';
 				}
@@ -433,8 +422,9 @@
 	});
 
 	$effect(() => {
+		if (!fetch) return;
 		const query = QueryUtils.buildQuery(filter);
-		fetch?.update({ query, limit: initLimit });
+		fetch.update({ query, limit: initLimit });
 	});
 
 	$effect(() => {
@@ -451,19 +441,6 @@
 
 	$effect(() => {
 		void displayOptions;
-		void filterTerm;
-		if (suggestions && inEdit && filterTerm.trim()) {
-			syncPopupState(filterTerm);
-		}
-	});
-
-	$effect(() => {
-		if (displayOptions.length && suggestions && !$fetch?.loading) {
-			setTimeout(() => fetchMoreIfNeeded(), 0);
-		}
-	});
-
-	$effect(() => {
 		focusIdx = Math.min(focusIdx, Math.max(displayOptions.length - 1, -1));
 	});
 
@@ -504,7 +481,7 @@
 	{copyIcon}
 	multirow={true}
 	isDirty={isDirty && showDirty}
-	popupOpen={open}
+	popupOpen={popupOpen}
 	{color}
 	{background}
 	{tabindex}
@@ -552,9 +529,9 @@
 	</div>
 </BaseCell>
 
-{#if inEdit && suggestions && open}
+{#if inEdit && suggestions && popupOpen}
 	<!-- svelte-ignore event_directive_deprecated -->
-	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} dismissible={false}>
+	<SuperPopover useAnchorWidth maxHeight={250} {anchor} open={popupOpen} dismissible={false}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
