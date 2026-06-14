@@ -346,7 +346,7 @@
 		margin-left: 0.75rem;
 		color: var(--spectrum-global-color-gray-600);
 	}
-	:global(.super-cell > input.editor) {
+	:global(.super-cell input.editor) {
 		font-style: inherit;
 		font-size: inherit;
 		min-width: 0;
@@ -364,14 +364,14 @@
 		border: none;
 	}
 
-	:global(.super-cell.inline > input.editor) {
+	:global(.super-cell.inline input.editor) {
 		padding: 0.25rem 0.25rem !important;
 	}
 	:global(.super-cell input.editor.placeholder) {
 		font-style: italic !important;
 		color: var(--spectrum-global-color-gray-600) !important;
 	}
-	:global(.super-cell > textarea.editor) {
+	:global(.super-cell textarea.editor) {
 		width: 100%;
 		height: 100%;
 		background: transparent;
@@ -384,7 +384,7 @@
 		padding: 0.75rem 0.75rem;
 		resize: vertical;
 	}
-	:global(.super-cell > textarea.editor.placeholder) {
+	:global(.super-cell textarea.editor.placeholder) {
 		font-style: italic !important;
 		color: var(--spectrum-global-color-gray-600);
 	}
