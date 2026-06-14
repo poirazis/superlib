@@ -21,13 +21,15 @@
 	let focusIdx = $state(-1);
 	let timer = $state<ReturnType<typeof setTimeout>>();
 	let searchTimer = $state<ReturnType<typeof setTimeout>>();
-	let initLimit = $state(30);
+	let initLimit = $state(15);
 	let isInitialLoad = $state(true);
 	let isFetchMore = $state(false);
 	let localValue = $state<string[]>([]);
 	let filterTerm = $state('');
 	let originalValue = $state('[]');
 	let fetch = $state<ReturnType<typeof fetchData>>();
+	let lastFetchKey = $state('');
+	let lastBaseFetchKey = $state('');
 
 	let config = $derived(cellOptions ?? {});
 	let controlType = $derived(config.controlType);
@@ -57,10 +59,7 @@
 
 	let displayOptions = $derived(filteredOptions.filter((option) => !localValue.includes(option)));
 	let popupOpen = $derived(
-		suggestions &&
-			inEdit &&
-			filterTerm.trim().length > 0 &&
-			(displayOptions.length > 0 || !!$fetch?.loading)
+		suggestions && inEdit && filterTerm.trim().length > 0 && displayOptions.length > 0
 	);
 
 	let tagColors = $derived.by(() => {
@@ -192,28 +191,36 @@
 		setTimeout(() => editor?.focus(), 0);
 	};
 
+	const buildSearchQuery = (term: string) => {
+		const appliedFilter = term
+			? [
+					...(filter || []),
+					{
+						field: valueColumn,
+						type: 'string',
+						operator: 'fuzzy',
+						value: term,
+						valueType: 'Value'
+					}
+				]
+			: filter || [];
+
+		return QueryUtils.buildQuery(appliedFilter);
+	};
+
 	const scheduleDataSearch = (term: string) => {
 		if (!fetch || !suggestions) return;
 
 		clearTimeout(searchTimer);
 		searchTimer = setTimeout(() => {
-			const appliedFilter = term
-				? [
-						...(filter || []),
-						{
-							field: valueColumn,
-							type: 'string',
-							operator: 'fuzzy',
-							value: term,
-							valueType: 'Value'
-						}
-					]
-				: filter || [];
+			const query = buildSearchQuery(term);
+			const fetchKey = JSON.stringify({ query, limit: initLimit, datasource });
+
+			if (fetchKey === lastFetchKey) return;
 
 			isFetchMore = false;
-			fetch?.update({
-				query: QueryUtils.buildQuery(appliedFilter)
-			});
+			lastFetchKey = fetchKey;
+			fetch.update({ query, limit: initLimit });
 		}, debounceDelay || 250);
 	};
 
@@ -222,8 +229,7 @@
 
 		if (suggestions) {
 			scheduleDataSearch(term);
-			filteredOptions = [...options];
-			focusIdx = term.trim() && displayOptions.length ? 0 : -1;
+			focusIdx = -1;
 			return;
 		}
 
@@ -242,11 +248,14 @@
 	};
 
 	const fetchMore = () => {
-		if ($fetch?.loading) return;
+		if (!fetch || $fetch?.loading) return;
 		if (($fetch?.rows?.length ?? 0) < initLimit) return;
 		isFetchMore = true;
 		initLimit += 100;
-		fetch?.update({ limit: initLimit });
+		const query = buildSearchQuery(filterTerm);
+		const fetchKey = JSON.stringify({ query, limit: initLimit, datasource });
+		lastFetchKey = fetchKey;
+		fetch.update({ query, limit: initLimit });
 	};
 
 	const handleScroll = (e: Event) => {
@@ -277,6 +286,7 @@
 			}
 			focusIdx = Math.min(focusIdx + 1, opts.length - 1);
 			if (focusIdx < 0 && opts.length) focusIdx = 0;
+			focusIdx = Math.min(focusIdx, Math.max(opts.length - 1, -1));
 			scrollHighlightedIntoView();
 			return;
 		}
@@ -392,45 +402,58 @@
 	});
 
 	$effect(() => {
-		const nextValue = Array.isArray(value) ? [...value] : value ? [value] : [];
-		localValue = nextValue;
-		originalValue = JSON.stringify(nextValue);
-	});
+		if ($csm === 'editing') return;
 
-	$effect(() => {
-		if (suggestions) {
-			initLimit = 15;
-			isInitialLoad = true;
-			isFetchMore = false;
+		const nextValue = Array.isArray(value) ? [...value] : value ? [value] : [];
+		const nextSerialized = JSON.stringify(nextValue);
+
+		if (nextSerialized !== JSON.stringify(localValue)) {
+			localValue = nextValue;
 		}
+
+		originalValue = nextSerialized;
 	});
 
 	$effect(() => {
 		if (!suggestions || !datasource) return;
 
+		const query = QueryUtils.buildQuery(filter);
+		const baseKey = JSON.stringify({ query, datasource });
+
 		untrack(() => {
-			const query = QueryUtils.buildQuery(filter);
-			fetch = fetchData({
-				API,
-				datasource,
-				options: {
-					query,
-					limit: initLimit
-				}
-			});
+			if (!fetch) {
+				isInitialLoad = true;
+				isFetchMore = false;
+				lastBaseFetchKey = baseKey;
+				lastFetchKey = JSON.stringify({ query, limit: initLimit, datasource });
+				fetch = fetchData({
+					API,
+					datasource,
+					options: {
+						query,
+						limit: initLimit
+					}
+				});
+				return;
+			}
+
+			if (baseKey === lastBaseFetchKey) return;
+
+			lastBaseFetchKey = baseKey;
+			filterTerm = '';
+			if (editor) editor.value = '';
+			focusIdx = -1;
+			initLimit = 15;
+			lastFetchKey = JSON.stringify({ query, limit: initLimit, datasource });
+			fetch.update({ query, limit: initLimit });
 		});
 	});
 
 	$effect(() => {
-		if (!fetch) return;
-		const query = QueryUtils.buildQuery(filter);
-		fetch.update({ query, limit: initLimit });
-	});
+		if (!suggestions || !fetch) return;
 
-	$effect(() => {
-		if (suggestions) {
-			loadOptionsFromRows($fetch?.rows);
-		}
+		const rows = $fetch?.rows;
+		untrack(() => loadOptionsFromRows(rows));
 	});
 
 	$effect(() => {
@@ -440,18 +463,13 @@
 	});
 
 	$effect(() => {
-		void displayOptions;
-		focusIdx = Math.min(focusIdx, Math.max(displayOptions.length - 1, -1));
-	});
-
-	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
 		} else if (readonly && copyable && !isEmpty) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else {
+		} else if ($csm !== 'editing' && $csm !== 'justCopied') {
 			csm.goTo('view');
 		}
 
