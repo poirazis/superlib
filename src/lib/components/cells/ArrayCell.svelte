@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, tick } from 'svelte';
 	import { dndzone, dragHandleZone, dragHandle } from 'svelte-dnd-action';
 	import { generate } from 'shortid';
 	import fsm from 'svelte-fsm';
@@ -85,6 +85,12 @@
 		};
 	};
 
+	const styleDraggedRow = (element: HTMLElement) => {
+		element.querySelectorAll('.action-buttons, .row-error-icon').forEach((node) => {
+			(node as HTMLElement).style.display = 'none';
+		});
+	};
+
 	const dndZoneOptions = $derived({
 		items: draggableItems,
 		dropTargetStyle: {
@@ -93,7 +99,8 @@
 		},
 		dragDisabled,
 		type: zoneType,
-		dropFromOthersDisabled: true
+		dropFromOthersDisabled: true,
+		transformDraggedElement: styleDraggedRow
 	});
 
 	const enrichValue = (val: unknown): string[] => {
@@ -148,11 +155,36 @@
 		rowErrors = cellValues.map((_, i) => (i === index ? message : (rowErrors[i] ?? '')));
 	};
 
-	const focusRow = (index: number) => {
-		if (dragging) return;
+	const focusRow = async (index: number) => {
+		if (dragging || index < 0 || index >= cellValues.length) return;
 
 		focusedRowIndex = index;
-		queueMicrotask(() => inputRefs[index]?.focus());
+		await tick();
+		inputRefs[index]?.focus();
+	};
+
+	const normalizeValue = (value: unknown) => (value == null ? '' : String(value).trim());
+
+	const isDuplicateAt = (index: number, value: string) => {
+		const normalized = normalizeValue(value);
+		if (!normalized) return false;
+
+		return cellValues.some((val, i) => i !== index && normalizeValue(val) === normalized);
+	};
+
+	const validateRowValue = (index: number, rawValue: unknown) => {
+		const nextValue = rawValue == null ? '' : String(rawValue);
+		const trimmed = normalizeValue(nextValue);
+
+		if (!trimmed) {
+			return { ok: false as const, message: 'Value cannot be empty' };
+		}
+
+		if (isDuplicateAt(index, trimmed)) {
+			return { ok: false as const, message: 'Duplicate value' };
+		}
+
+		return { ok: true as const, value: nextValue };
 	};
 
 	const brain = {
@@ -162,21 +194,26 @@
 			clearAllRowErrors();
 
 			const nextValue = detail == null ? '' : String(detail);
-			const isDuplicate = cellValues.some(
-				(val, i) => i !== index && val === nextValue && val !== ''
-			);
+			const trimmed = normalizeValue(nextValue);
 
-			if (cellValues[index] !== nextValue && !isDuplicate) {
-				cellValues[index] = nextValue;
-				cellValues = [...cellValues];
-			} else if (isDuplicate) {
-				setRowError(index, 'Duplicate value');
-				focusRow(index);
-			} else if (!nextValue) {
+			if (!trimmed) {
 				rowErrors.splice(index, 1);
 				cellValues.splice(index, 1);
 				cellValues = [...cellValues];
 				rowErrors = [...rowErrors];
+				commitValue();
+				return;
+			}
+
+			if (isDuplicateAt(index, trimmed)) {
+				setRowError(index, 'Duplicate value');
+				commitValue();
+				return;
+			}
+
+			if (cellValues[index] !== nextValue) {
+				cellValues[index] = nextValue;
+				cellValues = [...cellValues];
 			}
 
 			commitValue();
@@ -251,33 +288,24 @@
 
 			commitValue();
 		},
-		handleAdd: () => {
-			if (!canEdit) return;
+		handleAdd: (index: number = cellValues.length - 1) => {
+			if (!canEdit) return false;
 
 			clearAllRowErrors();
 
-			if (parsedMax > 0 && cellValues.length >= parsedMax) return;
+			if (parsedMax > 0 && cellValues.length >= parsedMax) return false;
 
-			const lastIndex = cellValues.length - 1;
-			const lastValue = (cellValues[lastIndex] || '').toString().trim();
-			if (!lastValue) {
-				setRowError(lastIndex, 'Value cannot be empty');
-				focusRow(lastIndex);
-				return;
-			}
-
-			const isDuplicate = cellValues
-				.slice(0, -1)
-				.some((val) => val.toString().trim() === lastValue);
-			if (isDuplicate) {
-				setRowError(lastIndex, 'Duplicate value');
-				focusRow(lastIndex);
-				return;
+			const validation = validateRowValue(index, cellValues[index]);
+			if (!validation.ok) {
+				setRowError(index, validation.message);
+				focusRow(index);
+				return false;
 			}
 
 			cellValues = [...cellValues, ''];
 			rowErrors = [...rowErrors, ''];
-			focusedRowIndex = cellValues.length - 1;
+			focusRow(cellValues.length - 1);
+			return true;
 		},
 		moveRowUp: (index: number) => {
 			if (index > 0 && canEdit && reorder !== 'disabled') {
@@ -296,10 +324,32 @@
 		handleKeyDown: (event: KeyboardEvent, index: number = focusedRowIndex) => {
 			if (!canEdit || index < 0) return;
 
-			if (event.key === 'Enter' && index === cellValues.length - 1 && cellValues[index]?.trim()) {
+			if (event.key === 'Enter') {
 				event.preventDefault();
 				event.stopPropagation();
-				brain.handleAdd();
+
+				const input = event.currentTarget as HTMLInputElement | null;
+				const pendingValue = input?.value ?? cellValues[index];
+				const validation = validateRowValue(index, pendingValue);
+
+				if (!validation.ok) {
+					setRowError(index, validation.message);
+					focusRow(index);
+					return;
+				}
+
+				if (cellValues[index] !== validation.value) {
+					cellValues[index] = validation.value;
+					cellValues = [...cellValues];
+					commitValue();
+				}
+
+				if (index < cellValues.length - 1) {
+					focusRow(index + 1);
+					return;
+				}
+
+				brain.handleAdd(index);
 				return;
 			}
 
@@ -498,6 +548,7 @@
 {#snippet rowActions(idx: number)}
 	{#if showActions}
 		<!-- svelte-ignore event_directive_deprecated -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="action-buttons" on:mousedown|stopPropagation>
 			{#if reorder === 'full'}
 				<SimpleButton
@@ -530,7 +581,10 @@
 {/snippet}
 
 {#snippet dndRow(draggableItem: (typeof draggableItems)[number], idx: number)}
-	<div class="row-shell">
+	<div
+		class="row-shell"
+		style:--array-row-bg={background ?? 'var(--spectrum-global-color-gray-50)'}
+	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div class="row" class:focused={canEdit && focusedRowIndex === idx}>
@@ -543,18 +597,12 @@
 						aria-label="Drag to reorder row {idx + 1}"
 						use:dragHandle
 					>
-						<i
-							class={focusedRowIndex == idx
-								? 'ph ph-pencil-simple'
-								: 'ph ph-dots-six-vertical'}
+						<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
 						></i>
 					</div>
 				{:else}
 					<div class="drag-handle" class:locked={readonly || disabled}>
-						<i
-							class={focusedRowIndex == idx
-								? 'ph ph-pencil-simple'
-								: 'ph ph-dots-six-vertical'}
+						<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
 						></i>
 					</div>
 				{/if}
@@ -740,5 +788,60 @@
 
 	.action-buttons :global(.simple-button .label:empty) {
 		display: none;
+	}
+
+	/* svelte-dnd-action clones rows to document.body, outside .super-cell */
+	:global(#dnd-action-dragged-el) {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		border-radius: 0.25rem;
+		border: 1px solid var(--spectrum-global-color-gray-300);
+		box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+		background: var(--array-row-bg, var(--spectrum-global-color-gray-100));
+		opacity: 0.98;
+		outline: 2px solid var(--spectrum-global-color-gray-300);
+	}
+
+	:global(#dnd-action-dragged-el .row) {
+		display: flex;
+		align-items: stretch;
+		height: 2rem;
+		min-height: 2rem;
+		overflow: hidden;
+		border-bottom: none;
+		background: var(--array-row-bg, var(--spectrum-global-color-gray-100));
+	}
+
+	:global(#dnd-action-dragged-el .drag-handle) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		align-self: stretch;
+		min-width: 26px;
+		height: 100%;
+		border-right: 1px solid var(--spectrum-global-color-gray-100);
+		color: var(--spectrum-global-color-blue-400);
+		background: var(--array-row-bg, var(--spectrum-global-color-gray-50));
+		font-weight: 600;
+	}
+
+	:global(#dnd-action-dragged-el input.editor) {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: 100%;
+		height: 100%;
+		border: none;
+		outline: none;
+		background: var(--array-row-bg, var(--spectrum-global-color-gray-50));
+		color: var(--spectrum-global-color-gray-800);
+		font-size: 13px;
+		padding: 0 0.75rem;
+		cursor: grabbing;
+	}
+
+	:global(#dnd-action-dragged-el .action-buttons),
+	:global(#dnd-action-dragged-el .row-error-icon) {
+		display: none !important;
 	}
 </style>
