@@ -20,10 +20,11 @@
 
 	const dispatch = createEventDispatcher();
 
-	let zoneType = generate();
+	let zoneType = $state(generate());
 	let cellValues = $state<string[]>(['']);
 	let dragging = $state(false);
 	let focusedRowIndex = $state(-1);
+	let inputRefs = $state<Record<number, HTMLInputElement>>({});
 	let anchor = $state<HTMLElement | null>(null);
 	let rowErrors = $state<string[]>([]);
 	let draggableItems = $state<Array<{ id: string; value: string; index: number }>>([]);
@@ -69,20 +70,31 @@
 			!(parsedMin > 0 && parsedMax > 0 && parsedMin === parsedMax)
 	);
 	let useDnD = $derived(reorder !== 'disabled');
+	let dragDisabled = $derived(readonly || disabled);
 
-	const focusInput = (node: HTMLInputElement, active: boolean) => {
-		if (active) {
-			node.focus();
-		}
+	const bindInputRef = (node: HTMLInputElement, idx: number) => {
+		inputRefs[idx] = node;
 
 		return {
-			update(active: boolean) {
-				if (active) {
-					node.focus();
-				}
+			update(newIdx: number) {
+				inputRefs[newIdx] = node;
+			},
+			destroy() {
+				delete inputRefs[idx];
 			}
 		};
 	};
+
+	const dndZoneOptions = $derived({
+		items: draggableItems,
+		dropTargetStyle: {
+			outline: 'none',
+			border: '1px dashed var(--spectrum-global-color-blue-700)'
+		},
+		dragDisabled,
+		type: zoneType,
+		dropFromOthersDisabled: true
+	});
 
 	const enrichValue = (val: unknown): string[] => {
 		let result: string[];
@@ -137,7 +149,10 @@
 	};
 
 	const focusRow = (index: number) => {
+		if (dragging) return;
+
 		focusedRowIndex = index;
+		queueMicrotask(() => inputRefs[index]?.focus());
 	};
 
 	const brain = {
@@ -201,15 +216,15 @@
 			if (focusedRowIndex >= 0) focusRow(focusedRowIndex);
 			commitValue();
 		},
-		updateRowOrder: (e: CustomEvent<{ items: typeof draggableItems }>) => {
+		handleDndConsider: (e: CustomEvent<{ items: typeof draggableItems }>) => {
 			dragging = true;
 			focusedRowIndex = -1;
 			draggableItems = e.detail.items;
 		},
-		handleFinalize: (e: CustomEvent<{ items: typeof draggableItems }>) => {
+		handleDndFinalize: (e: CustomEvent<{ items: typeof draggableItems }>) => {
+			dragging = false;
 			focusedRowIndex = -1;
 			draggableItems = e.detail.items;
-			dragging = false;
 			cellValues = draggableItems.map((item) => item.value);
 			rowIds = draggableItems.map((item) => item.id);
 			commitValue();
@@ -281,11 +296,7 @@
 		handleKeyDown: (event: KeyboardEvent, index: number = focusedRowIndex) => {
 			if (!canEdit || index < 0) return;
 
-			if (
-				event.key === 'Enter' &&
-				index === cellValues.length - 1 &&
-				cellValues[index]?.trim()
-			) {
+			if (event.key === 'Enter' && index === cellValues.length - 1 && cellValues[index]?.trim()) {
 				event.preventDefault();
 				event.stopPropagation();
 				brain.handleAdd();
@@ -308,6 +319,8 @@
 			}
 		},
 		handleRowFocusOut: (event: FocusEvent) => {
+			if (dragging) return;
+
 			const related = event.relatedTarget as Node | null;
 			const row = event.currentTarget as HTMLElement;
 
@@ -378,6 +391,14 @@
 				}
 			}
 		}
+	});
+
+	$effect(() => {
+		void reorder;
+
+		dragging = false;
+		focusedRowIndex = -1;
+		zoneType = generate();
 	});
 
 	$effect(() => {
@@ -463,9 +484,11 @@
 		readonly={rowLocked}
 		{disabled}
 		tabindex={rowLocked ? -1 : 0}
-		use:focusInput={canEdit && focusedRowIndex === idx}
+		use:bindInputRef={idx}
+		on:mousedown|stopPropagation
 		on:focusin={() => {
-			if (!rowLocked) focusedRowIndex = idx;
+			if (rowLocked || dragging) return;
+			focusedRowIndex = idx;
 		}}
 		on:keydown={(e) => brain.handleKeyDown(e, idx)}
 		on:input={(e) => brain.handleChange(e.currentTarget.value, idx)}
@@ -474,7 +497,8 @@
 
 {#snippet rowActions(idx: number)}
 	{#if showActions}
-		<div class="action-buttons">
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div class="action-buttons" on:mousedown|stopPropagation>
 			{#if reorder === 'full'}
 				<SimpleButton
 					icon="ph ph-caret-up"
@@ -505,43 +529,39 @@
 	{/if}
 {/snippet}
 
-{#snippet dndRow(draggableItem: (typeof draggableItems)[number], idx: number, withDragHandle: boolean)}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore event_directive_deprecated -->
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div
-		class="row"
-		tabindex={rowLocked ? -1 : 0}
-		class:focused={canEdit && focusedRowIndex === idx}
-		on:focusin={(e) => {
-			if (rowLocked) return;
-			if ((e.target as HTMLElement).closest('.drag-handle')) return;
-			focusedRowIndex = idx;
-		}}
-		on:focusout={brain.handleRowFocusOut}
-		on:keydown={(e) => brain.handleKeyDown(e, idx)}
-	>
-		{#if reorder === 'handle' || reorder === 'full'}
-			<!-- svelte-ignore a11y_interactive_supports_focus -->
-			{#if withDragHandle}
-				<div
-					class="drag-handle"
-					class:locked={rowLocked}
-					aria-label="Drag to reorder row {idx + 1}"
-					use:dragHandle
-				>
-					<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
-					></i>
-				</div>
-			{:else}
-				<div class="drag-handle" class:locked={rowLocked}>
-					<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
-					></i>
-				</div>
+{#snippet dndRow(draggableItem: (typeof draggableItems)[number], idx: number)}
+	<div class="row-shell">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div class="row" class:focused={canEdit && focusedRowIndex === idx}>
+			{#if reorder === 'handle' || reorder === 'full'}
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				{#if reorder === 'handle'}
+					<div
+						class="drag-handle"
+						class:locked={readonly || disabled}
+						aria-label="Drag to reorder row {idx + 1}"
+						use:dragHandle
+					>
+						<i
+							class={focusedRowIndex == idx
+								? 'ph ph-pencil-simple'
+								: 'ph ph-dots-six-vertical'}
+						></i>
+					</div>
+				{:else}
+					<div class="drag-handle" class:locked={readonly || disabled}>
+						<i
+							class={focusedRowIndex == idx
+								? 'ph ph-pencil-simple'
+								: 'ph ph-dots-six-vertical'}
+						></i>
+					</div>
+				{/if}
 			{/if}
-		{/if}
-		{@render rowInput(idx, draggableItem.value)}
-		{@render rowActions(idx)}
+			{@render rowInput(idx, draggableItem.value)}
+			{@render rowActions(idx)}
+		</div>
 	</div>
 {/snippet}
 
@@ -561,66 +581,58 @@
 	multirow={true}
 	isDirty={isDirty && showDirty}
 >
-	{#if useDnD}
-		{@const dndOptions = {
-			items: draggableItems,
-			dropTargetStyle: {
-				outline: 'none',
-				border: '1px dashed var(--spectrum-global-color-blue-700)'
-			},
-			dragDisabled: rowLocked,
-			type: zoneType,
-			dropFromOthersDisabled: true
-		}}
-		{#if reorder === 'handle'}
-			<div
-				class="cells"
-				class:view-mode={!canEdit}
-				tabindex="-1"
-				use:dragHandleZone={dndOptions}
-				onfinalize={brain.handleFinalize}
-				onconsider={brain.updateRowOrder}
-			>
-				{#each draggableItems as draggableItem, idx (draggableItem.id)}
-					{@render dndRow(draggableItem, idx, true)}
-				{/each}
-			</div>
+	{#key reorder}
+		{#if useDnD}
+			{#if reorder === 'handle'}
+				<div
+					class="cells"
+					class:view-mode={!canEdit}
+					tabindex="-1"
+					use:dragHandleZone={dndZoneOptions}
+					on:consider={brain.handleDndConsider}
+					on:finalize={brain.handleDndFinalize}
+				>
+					{#each draggableItems as draggableItem, idx (draggableItem.id)}
+						{@render dndRow(draggableItem, idx)}
+					{/each}
+				</div>
+			{:else}
+				<div
+					class="cells"
+					class:view-mode={!canEdit}
+					tabindex="-1"
+					use:dndzone={dndZoneOptions}
+					on:consider={brain.handleDndConsider}
+					on:finalize={brain.handleDndFinalize}
+				>
+					{#each draggableItems as draggableItem, idx (draggableItem.id)}
+						{@render dndRow(draggableItem, idx)}
+					{/each}
+				</div>
+			{/if}
 		{:else}
-			<div
-				class="cells"
-				class:view-mode={!canEdit}
-				tabindex="-1"
-				use:dndzone={dndOptions}
-				onfinalize={brain.handleFinalize}
-				onconsider={brain.updateRowOrder}
-			>
-				{#each draggableItems as draggableItem, idx (draggableItem.id)}
-					{@render dndRow(draggableItem, idx, false)}
+			<div class="cells" class:view-mode={!canEdit} tabindex="-1">
+				{#each cellValues as _, idx (idx)}
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<!-- svelte-ignore event_directive_deprecated -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<div
+						class="row"
+						tabindex={rowLocked ? -1 : 0}
+						class:focused={canEdit && focusedRowIndex === idx}
+						on:keydown={(e) => brain.handleKeyDown(e, idx)}
+						on:focusin={() => {
+							if (!rowLocked) focusedRowIndex = idx;
+						}}
+						on:focusout={brain.handleRowFocusOut}
+					>
+						{@render rowInput(idx, cellValues[idx])}
+						{@render rowActions(idx)}
+					</div>
 				{/each}
 			</div>
 		{/if}
-	{:else}
-		<div class="cells" class:view-mode={!canEdit} tabindex="-1">
-			{#each cellValues as _, idx (idx)}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore event_directive_deprecated -->
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<div
-					class="row"
-					tabindex={rowLocked ? -1 : 0}
-					class:focused={canEdit && focusedRowIndex === idx}
-					on:keydown={(e) => brain.handleKeyDown(e, idx)}
-					on:focusin={() => {
-						if (!rowLocked) focusedRowIndex = idx;
-					}}
-					on:focusout={brain.handleRowFocusOut}
-				>
-					{@render rowInput(idx, cellValues[idx])}
-					{@render rowActions(idx)}
-				</div>
-			{/each}
-		</div>
-	{/if}
+	{/key}
 </BaseCell>
 
 <style>
@@ -632,9 +644,14 @@
 		overflow: auto;
 	}
 
-	.cells.view-mode .drag-handle {
+	.cells.view-mode .drag-handle.locked {
 		cursor: default;
 		opacity: 0.5;
+	}
+
+	.row-shell {
+		display: flex;
+		flex-direction: column;
 	}
 
 	.row {
@@ -668,7 +685,7 @@
 		outline: none;
 	}
 
-	.row:last-child {
+	.row-shell:last-child .row {
 		border-bottom: none;
 	}
 
