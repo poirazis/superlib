@@ -11,7 +11,7 @@
 		quiet = undefined,
 		selected = undefined,
 		disabled = undefined,
-		onClick = () => console.log('Button clicked'),
+		onClick = undefined,
 		buttonClass = 'actionButton',
 		type = 'primary',
 		tooltip = undefined,

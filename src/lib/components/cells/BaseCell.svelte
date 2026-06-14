@@ -355,13 +355,16 @@
 		display: flex;
 		align-items: center;
 		height: 100%;
-		background: var(--spectrum-global-color-gray-50);
 		color: inherit;
 		border: none;
 		outline: none;
 		cursor: inherit;
 		padding: var(--super-cell-padding);
 		border: none;
+		background: transparent;
+	}
+	:global(.super-cell input.editor:focus) {
+		background: var(--spectrum-global-color-gray-50);
 	}
 
 	:global(.super-cell.inline input.editor) {
