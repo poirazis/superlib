@@ -474,7 +474,7 @@
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if ($csm !== 'editing' && $csm !== 'justCopied') {
+		} else {
 			csm.goTo('view');
 		}
 
