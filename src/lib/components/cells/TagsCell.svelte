@@ -333,7 +333,12 @@
 			emitChange();
 		}
 
-		if (controlType === 'select' && e.key === 'Backspace' && !(editor?.value ?? filterTerm) && !popupOpen) {
+		if (
+			controlType === 'select' &&
+			e.key === 'Backspace' &&
+			!(editor?.value ?? filterTerm) &&
+			!popupOpen
+		) {
 			localValue = [];
 			emitChange();
 		}
@@ -499,7 +504,7 @@
 	{copyIcon}
 	multirow={true}
 	isDirty={isDirty && showDirty}
-	popupOpen={popupOpen}
+	{popupOpen}
 	{color}
 	{background}
 	{tabindex}
