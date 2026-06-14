@@ -64,7 +64,6 @@
 	let isInitialLoad = $state(true);
 
 	let anchor = $state<HTMLElement | null>(null);
-	let popover = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | null>(null);
 
 	let open = $state(false);
@@ -287,7 +286,6 @@
 		},
 		view: {
 			focus: () => {
-				anchor?.focus();
 				return 'editing';
 			},
 			keydown(e: KeyboardEvent) {
@@ -300,26 +298,14 @@
 		editing: {
 			_enter: () => {
 				if (allOptions.length === 0 && !inputSelect && !isDataSource) {
-					console.warn('No options available for dropdown');
 					_message = 'No options available';
 					setTimeout(() => {
 						_message = null;
 					}, 1000);
-					anchor?.blur();
 					return 'view';
 				}
-
 				open = true;
 				focusIdx = -1;
-				setTimeout(() => {
-					if (showPopupSearch) {
-						popupSearchInput?.focus();
-					} else if (inputSelect) {
-						editor?.focus();
-					} else {
-						anchor?.focus();
-					}
-				}, 0);
 			},
 			_exit: () => {
 				dispatch('change', getEmittedValue());
@@ -384,26 +370,39 @@
 				open = false;
 				focusIdx = -1;
 				popupSearchTerm = '';
-				anchor?.blur();
+				anchor?.focus();
 				return 'view';
 			},
 			focusout: (e: FocusEvent) => {
 				const related = e.relatedTarget as Node | null;
 				if (
 					anchor?.contains(related) ||
-					anchor?.contains(document.activeElement) ||
-					popover?.contains(related) ||
-					popover?.contains(document.activeElement) ||
-					popover?.matches(':focus-within')
+					popupSearchInput?.contains(related) ||
+					listElement?.contains(related)
 				) {
+					return;
+				}
+				return 'view';
+			},
+			popupFocusout: (e: FocusEvent) => {
+				if (anchor?.contains(e.relatedTarget as Node | null)) {
 					return;
 				}
 				return 'view';
 			},
 			keydown(e: KeyboardEvent) {
 				navigateOptions(e);
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					anchor?.focus();
+					return 'view';
+				}
+				navigateOptions(e);
 			}
 		},
+		readonly: {},
+		disabled: {},
 		copyable: {
 			click() {
 				const copyValue = Array.isArray(value)
@@ -488,6 +487,10 @@
 			clearTimeout(searchTimer);
 		};
 	});
+
+	const focus = (node: HTMLElement) => {
+		node?.focus();
+	};
 </script>
 
 <!-- svelte-ignore a11y_interactive_supports_focus -->
@@ -534,6 +537,7 @@
 				on:input={csm.debounce}
 				on:focusout={csm.focusout}
 				on:keydown={csm.keydown}
+				use:focus
 			/>
 		{/if}
 		{#if $csm === 'view' || $csm == 'editing'}
@@ -545,7 +549,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<SuperPopover bind:popup={popover} {anchor} {open} useAnchorWidth={true} dismissible={false}>
+<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
 	{#snippet renderOption(option: Option, idx: number, selected: boolean = isSelected(option))}
 		<div
 			class="option"
@@ -564,7 +568,7 @@
 		</div>
 	{/snippet}
 
-	<div class="popup">
+	<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
 		{#if showPopupSearch}
 			<div class="searchControl">
 				<i
@@ -584,9 +588,8 @@
 					type="text"
 					placeholder={'Search...'}
 					value={popupSearchTerm}
+					use:focus
 					on:input={handlePopupSearch}
-					on:keydown={navigateOptions}
-					on:focusout={csm.focusout}
 				/>
 			</div>
 		{/if}

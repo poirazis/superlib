@@ -121,8 +121,9 @@
 		font-size: 13px;
 	}
 
-	.super-cell:focus {
-		outline: none;
+	.super-cell.view:focus,
+	.super-cell.view:focus-within {
+		outline: 1px solid var(--spectrum-global-color-static-blue-400);
 		border-color: var(--spectrum-global-color-static-blue-400);
 	}
 
