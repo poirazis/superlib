@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
@@ -17,7 +17,7 @@
 	} = $props();
 
 	let anchor = $state(null);
-	let picker = $state(null);
+	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let customValue = $state('');
 	let originalValue = $state();
@@ -279,10 +279,29 @@
 					this.cancel();
 				}
 			},
-			focusout(e) {
-				if (picker?.contains(e.relatedTarget)) return;
+			exitPopup() {
 				open = false;
 				return readonly ? 'readonly' : inline ? 'view' : 'editing';
+			},
+			focusout(e) {
+				const related = e.relatedTarget;
+				if (popup?.contains(related)) return;
+				return this.exitPopup();
+			},
+			popupFocusout(e) {
+				if (anchor?.contains(e.relatedTarget)) return;
+				return this.exitPopup();
+			},
+			popupKeydown(e) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					return this.exitPopup();
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					return this.cancel();
+				}
 			},
 			submit() {
 				open = false;
@@ -312,10 +331,8 @@
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if (inline) {
-			if (!inEdit) csm.goTo('view');
 		} else {
-			csm.goTo('editing');
+			csm.goTo('view');
 		}
 	});
 </script>
@@ -364,94 +381,107 @@
 		{offset}
 		maxHeight={500}
 		useAnchorWidth={false}
-		on:close={csm.focusout}
+		dismissible={false}
 	>
-		{#snippet children()}
-			<div bind:this={picker} class="container">
-		{#each categories as category}
-			<div class="category">
-				<div class="heading">{category.label}</div>
-				<div class="colors">
-					{#each category.colors as colorName}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<!-- svelte-ignore event_directive_deprecated -->
-						<div
-							on:click={() => onChange(`var(--spectrum-global-color-${colorName})`)}
-							on:keydown={(event) => handleKeydown(event, colorName, false)}
-							class="color-swatch"
-							title={prettyPrint(colorName, category)}
-							role="button"
-							tabindex="0"
-						>
-							<div
-								class="color-fill {spectrumTheme || ''}"
-								style="background: var(--spectrum-global-color-{colorName});"
-							>
-								{#if localValue === `var(--spectrum-global-color-${colorName})`}
-									<i class="ri-check-line" style="color: {checkColor};"></i>
-								{/if}
-							</div>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
+		>
+			<div class="container">
+				{#each categories as category}
+					<div class="category">
+						<div class="heading">{category.label}</div>
+						<div class="colors">
+							{#each category.colors as colorName}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<!-- svelte-ignore event_directive_deprecated -->
+								<div
+									on:click={() => onChange(`var(--spectrum-global-color-${colorName})`)}
+									on:keydown={(event) => handleKeydown(event, colorName, false)}
+									class="color-swatch"
+									title={prettyPrint(colorName, category)}
+									role="button"
+									tabindex="0"
+								>
+									<div
+										class="color-fill {spectrumTheme || ''}"
+										style="background: var(--spectrum-global-color-{colorName});"
+									>
+										{#if localValue === `var(--spectrum-global-color-${colorName})`}
+											<i class="ri-check-line" style="color: {checkColor};"></i>
+										{/if}
+									</div>
+								</div>
+							{/each}
 						</div>
-					{/each}
-				</div>
-			</div>
-		{/each}
-		{#if customCategory.colors.length > 0}
-			<div class="category">
-				<div class="heading">
-					<i class="ri-palette-line heading-icon"></i>
-					{customCategory.label}
-				</div>
-				<div class="colors">
-					{#each customCategory.colors as colorName}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<!-- svelte-ignore event_directive_deprecated -->
-						<div
-							on:click={() => onChange(colorName)}
-							on:keydown={(event) => handleKeydown(event, colorName, true)}
-							class="color-swatch"
-							title={prettyPrint(colorName, customCategory)}
-							role="button"
-							tabindex="0"
-						>
-							<div class="color-fill {spectrumTheme || ''}" style="background: {colorName};">
-								{#if localValue === colorName}
-									<i class="ri-check-line" style="color: {checkColor};"></i>
-								{/if}
-							</div>
+					</div>
+				{/each}
+				{#if customCategory.colors.length > 0}
+					<div class="category">
+						<div class="heading">
+							<i class="ri-palette-line heading-icon"></i>
+							{customCategory.label}
 						</div>
-					{/each}
-				</div>
+						<div class="colors">
+							{#each customCategory.colors as colorName}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<!-- svelte-ignore event_directive_deprecated -->
+								<div
+									on:click={() => onChange(colorName)}
+									on:keydown={(event) => handleKeydown(event, colorName, true)}
+									class="color-swatch"
+									title={prettyPrint(colorName, customCategory)}
+									role="button"
+									tabindex="0"
+								>
+									<div class="color-fill {spectrumTheme || ''}" style="background: {colorName};">
+										{#if localValue === colorName}
+											<i class="ri-check-line" style="color: {checkColor};"></i>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+				{#if allowCustom}
+					<div class="category category--custom">
+						<div class="heading">Custom</div>
+						<div class="custom">
+							<!-- svelte-ignore event_directive_deprecated -->
+							<input
+								type="text"
+								class="custom-input"
+								bind:value={customValue}
+								on:change={() => {
+									if (customValue) onChange(customValue);
+								}}
+								placeholder="Enter custom color"
+							/>
+							<!-- svelte-ignore a11y_consider_explicit_label -->
+							<!-- svelte-ignore event_directive_deprecated -->
+							<button class="clear-value" on:click={() => onChange(null)}>
+								<i class="ri-close-line"></i>
+							</button>
+						</div>
+					</div>
+				{/if}
 			</div>
-		{/if}
-		{#if allowCustom}
-			<div class="category category--custom">
-				<div class="heading">Custom</div>
-				<div class="custom">
-					<!-- svelte-ignore event_directive_deprecated -->
-					<input
-						type="text"
-						class="custom-input"
-						bind:value={customValue}
-						on:change={() => {
-							if (customValue) onChange(customValue);
-						}}
-						placeholder="Enter custom color"
-					/>
-					<!-- svelte-ignore a11y_consider_explicit_label -->
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="clear-value" on:click={() => onChange(null)}>
-						<i class="ri-close-line"></i>
-					</button>
-				</div>
-			</div>
-		{/if}
-			</div>
-		{/snippet}
+		</div>
 	</SuperPopover>
 {/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	.color-display {
 		display: flex;
 		align-items: center;

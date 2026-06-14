@@ -52,8 +52,11 @@
 	let sortColumn = $derived(cellOptions?.sortColumn);
 	let sortOrder = $derived(cellOptions?.sortOrder);
 	let debounceDelay = $derived(cellOptions?.debounce || 250);
+	let debounced = $derived(cellOptions?.debounced ?? false);
+	let showDirty = $derived(cellOptions?.showDirty);
 
 	let _message = $state<string | null>(null);
+	let originalValue = $state<unknown>(null);
 	let filterTerm = $state('');
 	let popupSearchTerm = $state('');
 	let focusIdx = $state(-1);
@@ -64,6 +67,7 @@
 	let isInitialLoad = $state(true);
 
 	let anchor = $state<HTMLElement | null>(null);
+	let popup = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | null>(null);
 
 	let open = $state(false);
@@ -75,6 +79,17 @@
 	let plaintext = $derived(optionsViewMode === 'text');
 
 	let tabindex = $state(0);
+
+	const emitChange = () => {
+		dispatch('change', getEmittedValue());
+		dispatch('labelChange', getEmittedLabel());
+	};
+
+	const clearSearchState = () => {
+		popupSearchTerm = '';
+		filterTerm = '';
+		focusIdx = -1;
+	};
 
 	let allOptions: Option[] = $derived.by(() => {
 		if (source == 'schema') {
@@ -272,11 +287,13 @@
 			csm.selectOption(opts[focusIdx].value);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
-			open = false;
-			focusIdx = -1;
-			popupSearchTerm = '';
-			filterTerm = '';
-			anchor?.focus();
+			if (open) {
+				open = false;
+				clearSearchState();
+				anchor?.focus();
+			} else {
+				csm.cancel();
+			}
 		}
 	};
 
@@ -304,16 +321,26 @@
 					}, 1000);
 					return 'view';
 				}
+				originalValue = getEmittedValue();
 				open = true;
 				focusIdx = -1;
+				dispatch('enteredit');
 			},
 			_exit: () => {
-				dispatch('change', getEmittedValue());
-				dispatch('labelChange', getEmittedLabel());
 				open = false;
-				popupSearchTerm = '';
-				filterTerm = '';
-				focusIdx = -1;
+				clearSearchState();
+				dispatch('exitedit');
+				if (!debounced) {
+					emitChange();
+				}
+			},
+			cancel() {
+				localValue = resolveToOptions(originalValue);
+				open = false;
+				clearSearchState();
+				dispatch('cancel');
+				anchor?.focus();
+				return 'view';
 			},
 			debounce() {
 				const term = editor?.value ?? '';
@@ -333,6 +360,10 @@
 							}
 						]
 					: [];
+
+				if (debounced) {
+					emitChange();
+				}
 			},
 			click: () => {
 				open = !open;
@@ -354,6 +385,9 @@
 					} else {
 						localValue = [...localValue, option];
 					}
+					if (debounced) {
+						emitChange();
+					}
 					return;
 				}
 
@@ -367,20 +401,21 @@
 					}
 				}
 
+				if (debounced) {
+					emitChange();
+				}
+
 				open = false;
-				focusIdx = -1;
-				popupSearchTerm = '';
+				clearSearchState();
 				anchor?.focus();
 				return 'view';
 			},
 			focusout: (e: FocusEvent) => {
 				const related = e.relatedTarget as Node | null;
-				if (
-					anchor?.contains(related) ||
-					popupSearchInput?.contains(related) ||
-					listElement?.contains(related)
-				) {
-					return;
+				if (related) {
+					if (related == editor || related == popupSearchInput) {
+						return;
+					}
 				}
 				return 'view';
 			},
@@ -422,6 +457,10 @@
 		},
 		justCopied: deferJustCopied(() => csm)
 	});
+
+	let isDirty = $derived(
+		$csm === 'editing' && JSON.stringify(getEmittedValue()) !== JSON.stringify(originalValue)
+	);
 
 	$effect(() => {
 		void value;
@@ -496,7 +535,16 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore event_directive_deprecated -->
-<BaseCell {id} bind:anchor {csm} {role} {error} {icon} popupOpen={open}>
+<BaseCell
+	{id}
+	bind:anchor
+	{csm}
+	{role}
+	{error}
+	{icon}
+	isDirty={isDirty && showDirty}
+	popupOpen={open}
+>
 	{#key $csm}
 		{#if $csm !== 'editing' || !inputSelect}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -568,6 +616,8 @@
 		</div>
 	{/snippet}
 
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore event_directive_deprecated -->
 	<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
 		{#if showPopupSearch}
 			<div class="searchControl">

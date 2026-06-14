@@ -25,7 +25,7 @@
 	let errors = $state<string[]>([]);
 	let anchor = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | HTMLTextAreaElement | null>(null);
-	let picker = $state<HTMLElement | null>(null);
+	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let isValidJson = $state(true);
 	let tabindex = $state(0);
@@ -201,8 +201,20 @@
 				dispatch('clear', null);
 			},
 			focusout(e: FocusEvent) {
-				if (picker?.contains(e.relatedTarget as Node)) return;
+				if (!isPopup) return;
+				if (popup?.contains(e.relatedTarget as Node)) return;
 				this.submit();
+			},
+			popupFocusout(e: FocusEvent) {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return this.submit();
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					return this.submit();
+				}
 			},
 			submit() {
 				if (isDirty && isValidJson) {
@@ -226,7 +238,7 @@
 					target === editor ||
 					target?.tagName === 'TEXTAREA' ||
 					target?.tagName === 'INPUT' ||
-					(target != null && picker?.contains(target));
+					(target != null && popup?.contains(target));
 
 				if (e.key === 'Enter' && !isMultiline && !isPopup) {
 					this.submit();
@@ -355,12 +367,16 @@
 		maxHeight={popupHeight + 48}
 		dismissible={false}
 	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
 		<div
-			bind:this={picker}
-			class="json-popup"
+			class="popup"
+			bind:this={popup}
 			style:--popup-height="{popupHeight}px"
-			on:focusout={csm.focusout}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
 		>
+			<div class="json-popup">
 			<div class="json-popup-header">
 				<span>JSON Editor</span>
 				{#if !isValidJson}
@@ -376,11 +392,18 @@
 				on:input={csm.debounce}
 				on:keydown={csm.keydown}
 			></textarea>
+			</div>
 		</div>
 	</SuperPopover>
 {/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	span.value {
 		min-width: 0;
 		max-width: 100%;

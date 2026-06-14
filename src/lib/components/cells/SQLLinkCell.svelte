@@ -26,12 +26,10 @@
 		limit = 100,
 		multi = false,
 		ownId: ownIdProp,
-		autofocus = false,
-		children
+		autofocus = false
 	} = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
-	let picker = $state<HTMLElement | null>(null);
 	let popup = $state<HTMLElement | null>(null);
 	let pickerApi = $state<{ focus?: () => void }>();
 	let open = $state(false);
@@ -57,6 +55,7 @@
 	let error = $derived(config.error);
 	let icon = $derived(config.icon);
 	let showDirty = $derived(config.showDirty);
+	let debounced = $derived(config.debounced);
 	let writable = $derived(!disabled && !readonly);
 	let isEmpty = $derived((localValue?.length ?? 0) < 1);
 	let tabindex = $state(0);
@@ -64,17 +63,6 @@
 	const getEmittedLabel = () => {
 		if (!localValue.length) return null;
 		return localValue.map((item) => item.primaryDisplay).join(', ');
-	};
-
-	const focusMovedToPicker = (related: EventTarget | null) => {
-		if (!(related instanceof Node)) {
-			return popup?.matches(':focus-within') ?? false;
-		}
-		return (
-			picker?.contains(related) ||
-			popup?.contains(related) ||
-			anchor?.contains(related)
-		);
 	};
 
 	const parseRow = (row: Record<string, unknown>, displayField?: string): SQLLinkItem | null => {
@@ -206,10 +194,17 @@
 			_exit: () => {
 				open = false;
 				dispatch('exitedit');
-				if (isDirty) {
+				if (!debounced) {
 					dispatch('change', localValue);
 					dispatch('labelChange', getEmittedLabel());
 				}
+			},
+			cancel() {
+				localValue = JSON.parse(originalValue);
+				open = false;
+				dispatch('cancel');
+				anchor?.focus();
+				return 'view';
 			},
 			click: () => {
 				open = !open;
@@ -219,34 +214,52 @@
 					e.preventDefault();
 					open = !open;
 				} else if (e.key === 'Escape') {
+					e.preventDefault();
 					if (open) {
 						open = false;
+						anchor?.focus();
 					} else {
-						localValue = JSON.parse(originalValue);
-						anchor?.blur();
-						return 'view';
+						return this.cancel();
 					}
-				} else if (e.key === 'Tab' && open) {
-					anchor?.blur();
-					return 'view';
 				} else if (open) {
 					pickerApi?.focus?.();
 				}
 			},
 			focusout: (e: FocusEvent) => {
-				if (focusMovedToPicker(e.relatedTarget)) return;
+				const related = e.relatedTarget as Node | null;
+				if (popup?.contains(related)) return;
 				return 'view';
 			},
-			popupfocusout: (e: FocusEvent) => {
-				if (focusMovedToPicker(e.relatedTarget)) return;
+			popupFocusout: (e: FocusEvent) => {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
 				return 'view';
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					anchor?.focus();
+					return 'view';
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					if (open) {
+						open = false;
+						anchor?.focus();
+					} else {
+						return this.cancel();
+					}
+				}
 			},
 			selectChange: (nextValue: SQLLinkItem[]) => {
 				localValue = nextValue;
 
+				if (debounced) {
+					dispatch('change', localValue);
+					dispatch('labelChange', getEmittedLabel());
+				}
+
 				if (!multi) {
 					open = false;
-					anchor?.blur();
+					anchor?.focus();
 					return 'view';
 				}
 			}
@@ -354,7 +367,7 @@
 			</div>
 		</span>
 
-		{#if !readonly && ($csm === 'view' || $csm === 'editing')}
+		{#if $csm === 'view' || $csm === 'editing'}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
 		{/if}
@@ -364,8 +377,7 @@
 {#if $csm === 'editing'}
 	<SuperPopover
 		{anchor}
-		bind:open
-		bind:popup
+		{open}
 		useAnchorWidth={true}
 		minWidth={config.pickerWidth || undefined}
 		align="left"
@@ -374,15 +386,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
-			class="picker-container"
-			bind:this={picker}
-			on:keydown={(e) => {
-				if (e.key === 'Escape' || e.key === 'Tab') {
-					anchor?.focus();
-					open = false;
-					e.preventDefault();
-				}
-			}}
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
 		>
 			{#if fieldSchema?.recursiveTable}
 				<LinkPickerTree
@@ -404,10 +411,7 @@
 					value={localValue}
 					bind:api={pickerApi}
 					on:change={handlePickerChange}
-					on:focusout={csm.popupfocusout}
-				>
-					{@render children?.()}
-				</SQLLinkPicker>
+				></SQLLinkPicker>
 			{/if}
 		</div>
 	</SuperPopover>
@@ -498,9 +502,10 @@
 		align-self: center;
 	}
 
-	.picker-container {
+	.popup {
 		display: flex;
 		flex-direction: column;
+		overflow: hidden;
 		min-width: 0;
 	}
 </style>

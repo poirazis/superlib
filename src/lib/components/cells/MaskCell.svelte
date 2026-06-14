@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import { InputMask, Masked, MaskedPattern, MaskedRegExp, createMask } from 'imask';

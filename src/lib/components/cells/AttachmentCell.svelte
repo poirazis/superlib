@@ -35,7 +35,7 @@
 	} = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
-	let picker = $state<HTMLElement | undefined>();
+	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let focusedOptionIdx = $state<number | undefined>();
 	let fileInput = $state<HTMLInputElement | undefined>();
@@ -157,30 +157,34 @@
 					this.cancel();
 				}
 			},
+			exitPopup() {
+				if (
+					JSON.stringify(localvalue) !==
+					JSON.stringify(normalizeAttachments(originalValue, multi))
+				) {
+					dispatch('change', localvalue);
+				}
+				dispatch('focusout');
+				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+			},
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
-				if (!anchor?.contains(related) && !picker?.contains(related)) {
-					if (
-						JSON.stringify(localvalue) !==
-						JSON.stringify(normalizeAttachments(originalValue, multi))
-					) {
-						dispatch('change', localvalue);
-					}
-					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
-				}
+				if (popup?.contains(related)) return;
+				return this.exitPopup();
 			},
-			submit(e: FocusEvent) {
-				const related = e.relatedTarget as Node | null;
-				if (!picker?.contains(related)) {
-					if (
-						JSON.stringify(localvalue) !==
-						JSON.stringify(normalizeAttachments(originalValue, multi))
-					) {
-						dispatch('change', localvalue);
-					}
-					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+			popupFocusout(e: FocusEvent) {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return this.exitPopup();
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					return this.exitPopup();
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					return this.cancel();
 				}
 			},
 			cancel() {
@@ -271,11 +275,18 @@
 		{open}
 		maxHeight={350}
 		useAnchorWidth
-		on:close={csm.focusout}
+		dismissible={false}
 	>
 		{#snippet children()}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="attachments" bind:this={picker}>
+			<!-- svelte-ignore event_directive_deprecated -->
+			<div
+				class="popup"
+				bind:this={popup}
+				on:focusout={csm.popupFocusout}
+				on:keydown={csm.popupKeydown}
+			>
+			<div class="attachments">
 		{#if localvalue?.length}
 			{#each localvalue as attachment, idx (idx)}
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -336,11 +347,18 @@
 			on:change={handleFileSelect}
 		/>
 			</div>
+			</div>
 		{/snippet}
 	</SuperPopover>
 {/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	.attachment-display {
 		display: flex;
 		align-items: center;

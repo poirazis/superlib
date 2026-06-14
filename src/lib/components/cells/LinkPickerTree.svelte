@@ -170,7 +170,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore event_directive_deprecated -->
-<div class="control">
+<div class="control" on:focusout={(e) => dispatch('focusout', e)}>
 	{#if search}
 		<div class="search">
 			<StringCell

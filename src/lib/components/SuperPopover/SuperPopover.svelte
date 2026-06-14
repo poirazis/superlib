@@ -17,6 +17,7 @@
 		open = $bindable(false),
 		useAnchorWidth = false,
 		dismissible = true,
+		onFocusout,
 		offset = 5,
 		offsetBelow,
 		customHeight,
@@ -103,6 +104,7 @@
 				anchor
 			}}
 			on:keydown={handleEscape}
+			on:focusout={onFocusout}
 			class={'spectrum-Popover is-open ' + (className ?? '')}
 			class:customZindex
 			class:hide-popover={open && !showPopover}

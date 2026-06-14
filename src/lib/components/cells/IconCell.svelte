@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
@@ -12,7 +12,7 @@
 	let { id, value, align = 'left', cellOptions = {} } = $props();
 
 	let anchor = $state(null);
-	let picker = $state(null);
+	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let searchQuery = $state('');
 	let selectedCategory = $state('all');
@@ -161,8 +161,29 @@
 				}
 			},
 			focusout(e) {
-				if (picker?.contains(e.relatedTarget)) return;
-				this.submit();
+				const related = e.relatedTarget;
+				if (popup?.contains(related)) return;
+				return this.submit();
+			},
+			popupFocusout(e) {
+				if (anchor?.contains(e.relatedTarget)) return;
+				return this.submit();
+			},
+			popupKeydown(e) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					return this.submit();
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					if (open) {
+						open = false;
+						anchor?.focus();
+						return;
+					}
+					return this.cancel();
+				}
 			},
 			submit() {
 				dispatch('change', localValue);
@@ -219,104 +240,119 @@
 </BaseCell>
 
 <!-- svelte-ignore event_directive_deprecated -->
-<SuperPopover {anchor} {open} {align} dismissible={false} maxHeight={450} useAnchorWidth={false}>
-	{#snippet children()}
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+
+{#if $csm === 'editing'}
+	<SuperPopover {anchor} {open} {align} dismissible={false} maxHeight={450} useAnchorWidth={false}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
 		<div
-			bind:this={picker}
-			on:focusout={csm.focusout}
-			class="icon-picker"
-			class:with-categories={showCategories}
-			style="
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
+		>
+			<div
+				class="icon-picker"
+				class:with-categories={showCategories}
+				style="
 					--icon-size: {iconSize};
 					--icon-padding: {iconPadding};
 					--items-per-row: {itemsPerRow};
 					--row-height: {rowHeight};
 				"
-		>
-			<div class="header">
-				{#if showCategories}
-					<div class="category-tabs">
-						{#each categories as category}
+			>
+				<div class="header">
+					{#if showCategories}
+						<div class="category-tabs">
+							{#each categories as category}
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button
+									class:selected={selectedCategory === category.id}
+									on:click={() => (selectedCategory = category.id)}
+									aria-label={`Show ${category.label} icons`}
+								>
+									{category.label}
+								</button>
+							{/each}
+						</div>
+					{/if}
+					<div class="search-container">
+						<i class="ph ph-magnifying-glass search-icon"></i>
+						<input
+							type="text"
+							bind:value={searchQuery}
+							placeholder="Search icons..."
+							class="search-input"
+							aria-label="Search icons"
+						/>
+						{#if searchQuery}
 							<!-- svelte-ignore event_directive_deprecated -->
 							<button
-								class:selected={selectedCategory === category.id}
-								on:click={() => (selectedCategory = category.id)}
-								aria-label={`Show ${category.label} icons`}
+								class="clear-search"
+								on:click={() => (searchQuery = '')}
+								aria-label="Clear search"
 							>
-								{category.label}
+								<i class="ph ph-x"></i>
 							</button>
-						{/each}
+						{/if}
 					</div>
-				{/if}
-				<div class="search-container">
-					<i class="ph ph-magnifying-glass search-icon"></i>
-					<input
-						type="text"
-						bind:value={searchQuery}
-						placeholder="Search icons..."
-						class="search-input"
-						aria-label="Search icons"
-					/>
-					{#if searchQuery}
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button
-							class="clear-search"
-							on:click={() => (searchQuery = '')}
-							aria-label="Clear search"
+				</div>
+
+				<div class="icons-grid-container">
+					{#if rowData.length > 0}
+						<VirtualList
+							items={rowData}
+							{itemHeight}
+							height={containerHeight}
+							width="100%"
+							let:item={rowIcons}
+							let:style
 						>
-							<i class="ph ph-x"></i>
+							<div class="icons-row" {style}>
+								{#each rowIcons as iconId}
+									<!-- svelte-ignore event_directive_deprecated -->
+									<button
+										class="icon-button"
+										class:selected={iconName === iconId}
+										on:click={() => onChange(iconId)}
+										on:keydown={(e) => handleKeydown(e, iconId)}
+										aria-label={`Select ${iconId} icon`}
+										tabindex="0"
+									>
+										<i class="ph ph-{iconId}"></i>
+									</button>
+								{/each}
+							</div>
+						</VirtualList>
+					{:else}
+						<div class="no-results">
+							<i class="ph ph-magnifying-glass"></i>
+							<p>No icons found</p>
+						</div>
+					{/if}
+				</div>
+
+				<div class="footer">
+					{#if localValue}
+						<!-- svelte-ignore event_directive_deprecated -->
+						<button class="clear-button" on:click={clearSelection}>
+							<i class="ph ph-x"></i> Clear
 						</button>
 					{/if}
 				</div>
 			</div>
-
-			<div class="icons-grid-container">
-				{#if rowData.length > 0}
-					<VirtualList
-						items={rowData}
-						{itemHeight}
-						height={containerHeight}
-						width="100%"
-						let:item={rowIcons}
-						let:style
-					>
-						<div class="icons-row" {style}>
-							{#each rowIcons as iconId}
-								<!-- svelte-ignore event_directive_deprecated -->
-								<button
-									class="icon-button"
-									class:selected={iconName === iconId}
-									on:click={() => onChange(iconId)}
-									on:keydown={(e) => handleKeydown(e, iconId)}
-									aria-label={`Select ${iconId} icon`}
-									tabindex="0"
-								>
-									<i class="ph ph-{iconId}"></i>
-								</button>
-							{/each}
-						</div>
-					</VirtualList>
-				{:else}
-					<div class="no-results">
-						<i class="ph ph-magnifying-glass"></i>
-						<p>No icons found</p>
-					</div>
-				{/if}
-			</div>
-
-			<div class="footer">
-				{#if localValue}
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button class="clear-button" on:click={clearSelection}>
-						<i class="ph ph-x"></i> Clear
-					</button>
-				{/if}
-			</div>
 		</div>
-	{/snippet}
-</SuperPopover>
+	</SuperPopover>
+{/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	.icon-display {
 		display: flex;
 		aspect-ratio: 1;

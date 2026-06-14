@@ -13,8 +13,7 @@
 	let { id, cellOptions, value, autofocus = false } = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
-	let editor = $state<HTMLElement | null>(null);
-	let picker = $state<HTMLElement | null>(null);
+	let popup = $state<HTMLElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let options = $state<string[]>([]);
 	let filteredOptions = $state<string[]>([]);
@@ -137,8 +136,7 @@
 	const toggleOption = (optionOrIdx: string | number) => {
 		if (disabled || readonly) return;
 
-		const option =
-			typeof optionOrIdx === 'number' ? filteredOptions[optionOrIdx] : optionOrIdx;
+		const option = typeof optionOrIdx === 'number' ? filteredOptions[optionOrIdx] : optionOrIdx;
 		if (!option) return;
 
 		const pos = localValue.indexOf(option);
@@ -357,16 +355,22 @@
 				}
 			},
 			focusout: (e: FocusEvent) => {
-				const target = e.relatedTarget as Node | null;
-				if (
-					anchor?.contains(target) ||
-					editor?.contains(target) ||
-					picker?.contains(target) ||
-					searchInput?.contains(target as Node)
-				) {
-					return;
-				}
+				const related = e.relatedTarget as Node | null;
+				if (popup?.contains(related)) return;
 				return 'view';
+			},
+			popupFocusout: (e: FocusEvent) => {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return 'view';
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					closePicker();
+					return 'view';
+				}
+				handleInputKeyboard(e);
 			},
 			keydown: handleCellKeyboard
 		},
@@ -519,83 +523,96 @@
 {#if inEdit}
 	<!-- svelte-ignore event_directive_deprecated -->
 	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} dismissible={false}>
-		<div bind:this={editor} class="editor">
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<!-- svelte-ignore event_directive_deprecated -->
-			<div class="search-control" on:keydown={handleInputKeyboard}>
-				<i
-					class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
-					class:action-icon={true}
-				></i>
-				<input
-					type="text"
-					placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
-					class="search-input"
-					bind:value={searchTerm}
-					bind:this={searchInput}
-					on:input={(e) => filterOptions((e.target as HTMLInputElement).value)}
-					on:focusout={csm.focusout}
-				/>
-			</div>
-
-			{#if suggestions}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
+		>
+			<div class="editor">
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<!-- svelte-ignore event_directive_deprecated -->
-				<div
-					bind:this={picker}
-					class="options"
-					on:wheel={(e) => e.stopPropagation()}
-					on:mouseleave={() => (focusedOptionIdx = -1)}
-					on:scroll={handleScroll}
-					on:mousedown|preventDefault|stopPropagation
-				>
-					{#if $fetch?.loading && !$fetch?.rows?.length}
-						<div class="option loading">
-							<i class="ph ph-spinner spin"></i>
-							Loading...
-						</div>
-					{:else if filteredOptions.length}
-						{#each filteredOptions as option, idx (option)}
-							{#if !localValue.includes(option)}
-								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div
-									class="option"
-									class:text={optionsViewMode === 'text'}
-									class:focused={focusedOptionIdx === idx}
-									style:--option-color={tagColors[option]}
-									on:mousedown|preventDefault={() => toggleOption(idx)}
-									on:mouseenter={() => (focusedOptionIdx = idx)}
-								>
-									<span>
-										{#if optionsViewMode !== 'text'}
-											<i class="ri-checkbox-blank-fill"></i>
-										{/if}
-										{option}
-									</span>
-								</div>
-							{/if}
-						{/each}
-						{#if $fetch?.loading}
+				<div class="search-control">
+					<i
+						class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
+						class:action-icon={true}
+					></i>
+					<input
+						type="text"
+						placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
+						class="search-input"
+						bind:value={searchTerm}
+						bind:this={searchInput}
+						on:input={(e) => filterOptions((e.target as HTMLInputElement).value)}
+					/>
+				</div>
+
+				{#if suggestions}
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<!-- svelte-ignore event_directive_deprecated -->
+					<div
+						class="options"
+						on:wheel={(e) => e.stopPropagation()}
+						on:mouseleave={() => (focusedOptionIdx = -1)}
+						on:scroll={handleScroll}
+						on:mousedown|preventDefault|stopPropagation
+					>
+						{#if $fetch?.loading && !$fetch?.rows?.length}
 							<div class="option loading">
 								<i class="ph ph-spinner spin"></i>
-								Loading more...
+								Loading...
+							</div>
+						{:else if filteredOptions.length}
+							{#each filteredOptions as option, idx (option)}
+								{#if !localValue.includes(option)}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="option"
+										class:text={optionsViewMode === 'text'}
+										class:focused={focusedOptionIdx === idx}
+										style:--option-color={tagColors[option]}
+										on:mousedown|preventDefault={() => toggleOption(idx)}
+										on:mouseenter={() => (focusedOptionIdx = idx)}
+									>
+										<span>
+											{#if optionsViewMode !== 'text'}
+												<i class="ri-checkbox-blank-fill"></i>
+											{/if}
+											{option}
+										</span>
+									</div>
+								{/if}
+							{/each}
+							{#if $fetch?.loading}
+								<div class="option loading">
+									<i class="ph ph-spinner spin"></i>
+									Loading more...
+								</div>
+							{/if}
+						{:else}
+							<div class="option not-found">
+								<span>
+									<i class="ri-close-line"></i>
+									No matches found, Tag will be added as new
+								</span>
 							</div>
 						{/if}
-					{:else}
-						<div class="option not-found">
-							<span>
-								<i class="ri-close-line"></i>
-								No matches found, Tag will be added as new
-							</span>
-						</div>
-					{/if}
-				</div>
-			{/if}
+					</div>
+				{/if}
+			</div>
 		</div>
 	</SuperPopover>
 {/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	.value {
 		flex: 1 1 auto;
 		min-width: 0;

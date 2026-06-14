@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { createEventDispatcher, getContext, untrack } from 'svelte';
 	import { DatePicker } from 'date-picker-svelte';
 	import fsm from 'svelte-fsm';
@@ -12,7 +12,7 @@
 	let { id, value, cellOptions = {}, autofocus = false } = $props();
 
 	let anchor = $state(null);
-	let popup = $state();
+	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let originalValue = $state(null);
 	let localValue = $state(null);
@@ -262,20 +262,35 @@
 					this.cancel();
 				}
 			},
-			focusout(e) {
-				const target = e.relatedTarget;
-				if (
-					anchor?.contains(target) ||
-					popup?.contains(target) ||
-					fromTimePicker?.contains?.(target) ||
-					toTimePicker?.contains?.(target)
-				) {
-					return;
-				}
-
+			exitPopup() {
 				open = false;
 				this.submit();
 				return readonly ? 'readonly' : 'view';
+			},
+			focusout(e) {
+				const related = e.relatedTarget as Node | null;
+				if (popup?.contains(related)) return;
+				return this.exitPopup();
+			},
+			popupFocusout(e) {
+				if (anchor?.contains(e.relatedTarget as Node)) return;
+				return this.exitPopup();
+			},
+			popupKeydown(e) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					anchor?.focus();
+					return this.exitPopup();
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					if (open) {
+						open = false;
+						anchor?.focus();
+						return;
+					}
+					return this.cancel();
+				}
 			},
 			submit() {
 				if (JSON.stringify(localValue) != JSON.stringify(originalValue)) {
@@ -400,6 +415,7 @@
 	{/if}
 </BaseCell>
 
+{#if $csm === 'editing'}
 <SuperPopover
 	{anchor}
 	{open}
@@ -407,9 +423,16 @@
 	maxHeight={400}
 	useAnchorWidth={false}
 	dismissible={false}
-	bind:popup
 >
 	{#snippet children()}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore event_directive_deprecated -->
+		<div
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
+		>
 		<div
 			class="range-picker-container"
 			style:--date-picker-background="var(--spectrum-global-color-gray-75)"
@@ -469,10 +492,18 @@
 				</div>
 			{/if}
 		</div>
+		</div>
 	{/snippet}
 </SuperPopover>
+{/if}
 
 <style>
+	.popup {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
 	span.value {
 		font-style: inherit;
 		font-size: 13px;

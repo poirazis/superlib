@@ -30,7 +30,7 @@
 	} = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
-	let picker = $state<HTMLElement | null>(null);
+	let popup = $state<HTMLElement | null>(null);
 	let pickerApi = $state<{ focus?: () => void }>();
 	let open = $state(false);
 	let localValue = $state<LinkItem[]>([]);
@@ -50,8 +50,7 @@
 	let plaintext = $derived(config.relViewMode === 'text' || !config.relViewMode);
 	let inline = $derived(config.role === 'inline');
 	let multirow = $derived(
-		config.controlType === 'expanded' &&
-			((localValue?.length ?? 0) > 1 || $csm === 'editing')
+		config.controlType === 'expanded' && ((localValue?.length ?? 0) > 1 || $csm === 'editing')
 	);
 	let singleSelect = $derived(
 		fieldSchema?.relationshipType === 'one-to-many' ||
@@ -118,13 +117,19 @@
 	const toLocalValue = (raw: unknown): LinkItem[] => {
 		if (raw == null || raw === '') return [];
 
-		if (fieldSchema?.relationshipType === 'self' && !Array.isArray(raw) && typeof raw !== 'object') {
+		if (
+			fieldSchema?.relationshipType === 'self' &&
+			!Array.isArray(raw) &&
+			typeof raw !== 'object'
+		) {
 			return [{ _id: String(raw), primaryDisplay: String(raw) }];
 		}
 
 		if (multi) {
 			return Array.isArray(raw)
-				? raw.map((item) => parseLinkItem(item, primaryDisplayField)).filter((item): item is LinkItem => !!item)
+				? raw
+						.map((item) => parseLinkItem(item, primaryDisplayField))
+						.filter((item): item is LinkItem => !!item)
 				: [];
 		}
 
@@ -240,6 +245,13 @@
 					dispatch('labelChange', getEmittedLabel());
 				}
 			},
+			cancel() {
+				localValue = JSON.parse(originalValue);
+				open = false;
+				dispatch('cancel');
+				anchor?.focus();
+				return 'view';
+			},
 			click: () => {
 				open = !open;
 			},
@@ -248,40 +260,53 @@
 					e.preventDefault();
 					open = !open;
 				} else if (e.key === 'Escape') {
+					e.preventDefault();
 					if (open) {
 						open = false;
+						anchor?.focus();
 					} else {
-						localValue = JSON.parse(originalValue);
-						anchor?.blur();
-						return 'view';
+						return this.cancel();
 					}
-				} else if (e.key === 'Tab' && open) {
-					anchor?.blur();
-					return 'view';
 				} else if (open) {
 					pickerApi?.focus?.();
 				}
 			},
 			focusout: (e: FocusEvent) => {
-				if (picker?.contains(e.relatedTarget as Node)) return;
+				const related = e.relatedTarget as Node | null;
+				if (popup?.contains(related)) return;
 				return 'view';
 			},
-			popupfocusout: (e: FocusEvent) => {
+			popupFocusout: (e: FocusEvent) => {
 				if (anchor?.contains(e.relatedTarget as Node)) return;
 				return 'view';
+			},
+			popupKeydown(e: KeyboardEvent) {
+				if (e.key === 'Tab') {
+					anchor?.focus();
+					return 'view';
+				}
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					if (open) {
+						open = false;
+						anchor?.focus();
+					} else {
+						return this.cancel();
+					}
+				}
 			},
 			selectChange: (nextValue: LinkItem[]) => {
 				localValue = nextValue;
 
-				if (singleSelect) {
-					open = false;
-					anchor?.blur();
-					return 'view';
-				}
-
 				if (debounced) {
 					dispatch('change', getEmittedValue());
 					dispatch('labelChange', getEmittedLabel());
+				}
+
+				if (singleSelect) {
+					open = false;
+					anchor?.focus();
+					return 'view';
 				}
 			}
 		},
@@ -435,27 +460,22 @@
 			</div>
 		</span>
 
-		{#if !readonly && ($csm === 'view' || $csm === 'editing')}
+		{#if $csm === 'view' || $csm === 'editing'}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
 		{/if}
 	{/key}
 </BaseCell>
 
-<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
-	{#if $csm === 'editing'}
+{#if $csm === 'editing'}
+	<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
 		<div
-			class="picker-container"
-			bind:this={picker}
-			on:keydown={(e) => {
-				if (e.key === 'Escape' || e.key === 'Tab') {
-					anchor?.focus();
-					open = false;
-					e.preventDefault();
-				}
-			}}
+			class="popup"
+			bind:this={popup}
+			on:focusout={csm.popupFocusout}
+			on:keydown={csm.popupKeydown}
 		>
 			{#if fieldSchema?.recursiveTable}
 				<LinkPickerTree
@@ -479,12 +499,11 @@
 					value={localValue}
 					wide={config.wide && !singleSelect}
 					on:change={handlePickerChange}
-					on:focusout={csm.popupfocusout}
 				/>
 			{/if}
 		</div>
-	{/if}
-</SuperPopover>
+	</SuperPopover>
+{/if}
 
 <style>
 	span.value {
@@ -580,9 +599,10 @@
 		align-self: center;
 	}
 
-	.picker-container {
+	.popup {
 		display: flex;
 		flex-direction: column;
+		overflow: hidden;
 		min-width: 0;
 	}
 </style>

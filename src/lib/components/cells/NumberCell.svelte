@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
