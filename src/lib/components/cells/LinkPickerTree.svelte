@@ -1,9 +1,9 @@
 <script>
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import SuperTree from '../SuperTree/SuperTree.svelte';
-	import StringCell from './StringCell.svelte';
+	import { getContext } from 'svelte';
 
-	const { API, fetchData, QueryUtils, notificationStore } = getContext('sdk');
+	const { notificationStore } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -11,19 +11,18 @@
 		ownId,
 		fieldSchema,
 		joinColumn,
-		sortColumn,
-		sortOrder,
-		filter = [],
-		limit = 250,
+		rows = [],
+		loading = false,
+		loaded = false,
+		primaryDisplay,
+		idColumn = '_id',
 		multi = false,
-		quiet = false,
-		search = false
+		quiet = false
 	} = $props();
 
 	let selectedNodes = $state([]);
 	let maxNodeSelection = 10;
 	let name = $derived(joinColumn || fieldSchema.name);
-	let appliedFilter = $state([]);
 
 	let tree = $state({
 		root: true,
@@ -32,60 +31,38 @@
 		children: []
 	});
 
-	let fetch = $state();
-	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
-
-	$effect(() => {
-		fetch = fetchData({
-			API,
-			datasource: {
-				type: 'table',
-				tableId: fieldSchema.tableId
-			},
-			options: {
-				sortOrder,
-				sortColumn,
-				query: defaultQuery,
-				limit
-			}
-		});
-	});
-
-	let primaryDisplay = $derived($fetch?.definition?.primaryDisplay);
-	let idColumn = $derived($fetch?.definition?.primary?.[0] ?? '_id');
-
-	const getChildren = (rows, parent) => {
+	const getChildren = (allRows, parent) => {
 		let children = [];
-		rows?.forEach((row) => {
+		allRows?.forEach((row) => {
 			if (row[name] == parent[idColumn]) {
 				children.push({
 					id: row[idColumn],
 					disabled: row[idColumn] == ownId,
 					disableChildren: true,
-					label: row[$fetch.definition.primaryDisplay],
-					children: getChildren(rows, row)
+					label: row[primaryDisplay],
+					children: getChildren(allRows, row)
 				});
 			}
 		});
 		return children;
 	};
 
-	const buildRootTree = (rows) => {
+	const buildRootTree = (allRows) => {
 		const nextTree = {
 			root: true,
 			id: 'root',
 			label: 'Super Tree',
 			children: []
 		};
-		if (rows?.length) {
-			rows?.forEach((row) => {
+		if (allRows?.length) {
+			allRows?.forEach((row) => {
 				if (!row[name]) {
 					nextTree.children.push({
 						id: row[idColumn],
 						disabled: row[idColumn] == ownId,
 						disableChildren: true,
-						label: row[$fetch.definition.primaryDisplay],
-						children: getChildren(rows, row)
+						label: row[primaryDisplay],
+						children: getChildren(allRows, row)
 					});
 				}
 			});
@@ -94,7 +71,7 @@
 	};
 
 	$effect(() => {
-		buildRootTree($fetch?.rows);
+		buildRootTree(rows);
 	});
 
 	$effect(() => {
@@ -107,13 +84,6 @@
 			selectedNodes = [];
 		}
 	});
-
-	const pickerCellOptions = {
-		icon: 'ri-search-line',
-		initialState: 'Editing',
-		role: 'inline',
-		debounce: 50
-	};
 
 	const handleNodeSelect = (e) => {
 		if (e.detail.id == ownId) return;
@@ -134,36 +104,13 @@
 				selectedNodes[0]?.id !== e.detail.id ? [{ id: e.detail.id, label: e.detail.label }] : [];
 		}
 
-		if (pickerCellOptions.debounce) {
-			dispatch(
-				'change',
-				selectedNodes.map((x) => ({
-					_id: x.id,
-					primaryDisplay: x.label
-				}))
-			);
-		}
-	};
-
-	const handleSearch = (e) => {
-		if (e.detail && e.detail != '') {
-			appliedFilter = [
-				...filter,
-				{
-					field: primaryDisplay,
-					type: 'string',
-					operator: 'fuzzy',
-					value: e.detail,
-					valueType: 'Value'
-				}
-			];
-		} else {
-			appliedFilter = filter ?? [];
-		}
-
-		fetch?.update({
-			query: QueryUtils.buildQuery(appliedFilter)
-		});
+		dispatch(
+			'change',
+			selectedNodes.map((x) => ({
+				_id: x.id,
+				primaryDisplay: x.label
+			}))
+		);
 	};
 </script>
 
@@ -171,23 +118,13 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore event_directive_deprecated -->
 <div class="control" on:focusout={(e) => dispatch('focusout', e)}>
-	{#if search}
-		<div class="search">
-			<StringCell
-				cellOptions={pickerCellOptions}
-				autofocus
-				on:change={handleSearch}
-				on:exitedit={() => dispatch('focusout', {})}
-			/>
-		</div>
-	{/if}
 	<ul class="spectrum-TreeView" style="margin: unset;" class:spectrum-TreeView--quiet={quiet}>
-		{#key $fetch?.rows}
-			{#if $fetch?.loaded && $fetch?.rows?.length}
+		{#key rows}
+			{#if loaded && rows?.length}
 				{#each tree?.children as node, idx (idx)}
 					<SuperTree tree={node} nodeSelection {selectedNodes} on:nodeSelect={handleNodeSelect} />
 				{/each}
-			{:else if $fetch?.loading}
+			{:else if loading}
 				<li class="spectrum-TreeView-item" class:is-open={true}>
 					<div class="spectrum-TreeView-itemLink">Loading</div>
 				</li>
@@ -212,13 +149,6 @@
 		gap: 0.25rem;
 		min-height: 260px;
 		max-height: 260px;
-	}
-
-	.search {
-		height: 2rem;
-		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
-		display: flex;
-		align-items: stretch;
 	}
 
 	.spectrum-TreeView {

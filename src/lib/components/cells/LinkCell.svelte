@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, untrack } from 'svelte';
+	import { getContext, untrack, tick } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
@@ -31,7 +31,12 @@
 
 	let anchor = $state<HTMLElement | null>(null);
 	let popup = $state<HTMLElement | null>(null);
-	let pickerApi = $state<{ focus?: () => void }>();
+	let popupSearchInput = $state<HTMLInputElement | null>(null);
+	let popupSearchTerm = $state('');
+	let pickerFetch = $state<ReturnType<typeof fetchData> | undefined>();
+	let pickerCurrentLimit = $state(15);
+	let pickerSearchTimer = $state<ReturnType<typeof setTimeout>>();
+	let focusIdx = $state(-1);
 	let open = $state(false);
 	let localValue = $state<LinkItem[]>([]);
 	let originalValue = $state('[]');
@@ -72,6 +77,15 @@
 	let isEmpty = $derived((localValue?.length ?? 0) < 1);
 	let isDirty = $derived($csm === 'editing' && originalValue !== JSON.stringify(localValue));
 	let tabindex = $state(0);
+	let showPopupSearch = $derived(fieldSchema?.recursiveTable ? !!config.search : true);
+	let isRecursiveTable = $derived(!!fieldSchema?.recursiveTable);
+	let pickerInitLimit = $derived(isRecursiveTable ? limit : 15);
+	let pickerPrimaryDisplay = $derived(
+		primaryDisplayField ||
+			$pickerFetch?.definition?.primaryDisplay ||
+			(isUser ? 'email' : 'name')
+	);
+	let pickerIdColumn = $derived($pickerFetch?.definition?.primary?.[0] ?? '_id');
 
 	let datasourceType = $derived(isUser ? 'user' : 'table');
 	let writable = $derived(!disabled && !readonly);
@@ -234,11 +248,20 @@
 			_enter: () => {
 				originalValue = JSON.stringify(localValue);
 				open = true;
+				focusIdx = -1;
+				pickerCurrentLimit = pickerInitLimit;
 				dispatch('enteredit');
-				setTimeout(() => pickerApi?.focus?.(), 0);
+				setTimeout(() => {
+					if (showPopupSearch) {
+						popupSearchInput?.focus();
+					}
+				}, 0);
 			},
 			_exit: () => {
 				open = false;
+				popupSearchTerm = '';
+				focusIdx = -1;
+				clearTimeout(pickerSearchTimer);
 				dispatch('exitedit');
 				if (!debounced) {
 					dispatch('change', getEmittedValue());
@@ -267,8 +290,8 @@
 					} else {
 						return this.cancel();
 					}
-				} else if (open) {
-					pickerApi?.focus?.();
+				} else if (open && showPopupSearch) {
+					popupSearchInput?.focus();
 				}
 			},
 			focusout: (e: FocusEvent) => {
@@ -285,14 +308,8 @@
 					anchor?.focus();
 					return 'view';
 				}
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					if (open) {
-						open = false;
-						anchor?.focus();
-					} else {
-						return this.cancel();
-					}
+				if (!isRecursiveTable) {
+					navigatePickerOptions(e);
 				}
 			},
 			selectChange: (nextValue: LinkItem[]) => {
@@ -329,6 +346,142 @@
 	const handlePickerChange = (e: CustomEvent<LinkItem[]>) => {
 		csm.selectChange(e.detail);
 	};
+
+	const buildPickerQuery = (term: string) => {
+		if (!term || !showPopupSearch) {
+			return QueryUtils.buildQuery(filter);
+		}
+
+		const displayField = primaryDisplayField || (isUser ? 'email' : 'name');
+
+		return QueryUtils.buildQuery([
+			...filter,
+			{
+				field: displayField,
+				type: 'string',
+				operator: 'fuzzy',
+				value: term,
+				valueType: 'Value'
+			}
+		]);
+	};
+
+	const schedulePickerSearch = (term: string) => {
+		if (!pickerFetch) return;
+
+		clearTimeout(pickerSearchTimer);
+		pickerSearchTimer = setTimeout(() => {
+			pickerCurrentLimit = pickerInitLimit;
+			pickerFetch?.update({
+				query: buildPickerQuery(term),
+				limit: pickerCurrentLimit
+			});
+		}, 200);
+	};
+
+	const fetchMorePickerRows = () => {
+		if ($pickerFetch?.loading) return;
+		if (($pickerFetch?.rows?.length ?? 0) < pickerCurrentLimit) return;
+
+		pickerCurrentLimit += 100;
+		pickerFetch?.update({
+			query: buildPickerQuery(popupSearchTerm),
+			limit: pickerCurrentLimit
+		});
+	};
+
+	const selectPickerRow = (row: Record<string, unknown>) => {
+		const rowId = row._id ?? row.id;
+		const item: LinkItem = {
+			_id: String(rowId),
+			primaryDisplay: String(row[pickerPrimaryDisplay] ?? rowId)
+		};
+
+		let nextValue: LinkItem[];
+		if (singleSelect) {
+			nextValue = localValue[0]?._id == rowId ? [] : [item];
+		} else {
+			const pos = localValue.findIndex((v) => v._id == rowId);
+			nextValue =
+				pos > -1 ? localValue.filter((_, i) => i !== pos) : [...localValue, item];
+		}
+
+		csm.selectChange(nextValue);
+	};
+
+	const scrollHighlightedIntoView = async () => {
+		if (focusIdx < 0 || !popup) return;
+		await tick();
+		const highlighted = popup.querySelector('.option.highlighted');
+		highlighted?.scrollIntoView({ block: 'nearest' });
+	};
+
+	const navigatePickerOptions = (e: KeyboardEvent) => {
+		const rows = $pickerFetch?.rows ?? [];
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			focusIdx = Math.min(focusIdx + 1, rows.length - 1);
+			if (focusIdx < 0 && rows.length) focusIdx = 0;
+			scrollHighlightedIntoView();
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			focusIdx = Math.max(focusIdx - 1, 0);
+			scrollHighlightedIntoView();
+		} else if (e.key === 'Enter' && focusIdx > -1 && rows[focusIdx]) {
+			e.preventDefault();
+			selectPickerRow(rows[focusIdx]);
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			open = false;
+			anchor?.focus();
+		}
+	};
+
+	const handlePopupSearch = (e: Event) => {
+		popupSearchTerm = (e.target as HTMLInputElement).value;
+		focusIdx = popupSearchTerm && ($pickerFetch?.rows?.length ?? 0) ? 0 : -1;
+		schedulePickerSearch(popupSearchTerm);
+	};
+
+	const clearPopupSearch = () => {
+		popupSearchTerm = '';
+		focusIdx = -1;
+		schedulePickerSearch('');
+	};
+
+	$effect(() => {
+		if ($csm !== 'editing' || !tableId || !writable) {
+			pickerFetch = undefined;
+			return;
+		}
+
+		const initLimit = pickerInitLimit;
+		pickerCurrentLimit = initLimit;
+
+		untrack(() => {
+			pickerFetch = fetchData({
+				API,
+				datasource: {
+					type: datasourceType,
+					tableId
+				},
+				options: {
+					query: buildPickerQuery(''),
+					limit: initLimit,
+					...(isRecursiveTable && config.sortColumn
+						? { sortColumn: config.sortColumn, sortOrder: config.sortOrder }
+						: {})
+				}
+			});
+		});
+	});
+
+	$effect(() => {
+		if ($pickerFetch?.rows) {
+			focusIdx = Math.min(focusIdx, $pickerFetch.rows.length - 1);
+		}
+	});
 
 	$effect(() => {
 		const raw = value;
@@ -477,12 +630,34 @@
 			on:focusout={csm.popupFocusout}
 			on:keydown={csm.popupKeydown}
 		>
-			{#if fieldSchema?.recursiveTable}
+			{#if showPopupSearch}
+				<div class="popup-search">
+					<i class="ph ph-magnifying-glass"></i>
+					<input
+						bind:this={popupSearchInput}
+						class="search"
+						class:placeholder={!popupSearchTerm}
+						type="text"
+						placeholder={'Search...'}
+						value={popupSearchTerm}
+						use:focus
+						on:input={handlePopupSearch}
+					/>
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<i
+						class="ph ph-x clear-icon"
+						on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
+					></i>
+				</div>
+			{/if}
+			{#if isRecursiveTable}
 				<LinkPickerTree
 					{fieldSchema}
-					{filter}
-					search={config.search}
-					{limit}
+					rows={$pickerFetch?.rows ?? []}
+					loading={$pickerFetch?.loading ?? false}
+					loaded={$pickerFetch?.loaded ?? false}
+					primaryDisplay={pickerPrimaryDisplay}
+					idColumn={pickerIdColumn}
 					joinColumn={config.joinColumn}
 					value={localValue}
 					{ownId}
@@ -490,15 +665,18 @@
 						fieldSchema.relationshipType === 'many-to-one'}
 					on:change={handlePickerChange}
 				/>
-			{:else}
+			{:else if $pickerFetch}
 				<LinkPickerSelect
-					bind:api={pickerApi}
-					{fieldSchema}
-					{filter}
+					rows={$pickerFetch.rows ?? []}
+					loading={$pickerFetch.loading ?? false}
+					loaded={$pickerFetch.loaded ?? false}
+					primaryDisplay={pickerPrimaryDisplay}
 					{singleSelect}
 					value={localValue}
+					bind:focusIdx
 					wide={config.wide && !singleSelect}
 					on:change={handlePickerChange}
+					on:fetchmore={fetchMorePickerRows}
 				/>
 			{/if}
 		</div>
@@ -604,5 +782,49 @@
 		flex-direction: column;
 		overflow: hidden;
 		min-width: 0;
+	}
+
+	.popup-search {
+		height: 2rem;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-shrink: 0;
+		padding: 0rem 0.75rem;
+	}
+
+	.popup-search > i {
+		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.clear-icon {
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: 4px;
+		color: var(--spectrum-global-color-red-400);
+	}
+
+	.clear-icon:hover {
+		background-color: var(--spectrum-global-color-gray-100);
+		color: var(--spectrum-global-color-red-700);
+	}
+
+	.popup-search > input {
+		flex: 1;
+		height: 100%;
+		max-width: 100%;
+		outline: none;
+		background: none;
+		border: none;
+		color: inherit;
+		padding-left: 0.5rem;
+		font-family: inherit;
+		font-size: inherit;
+	}
+
+	.popup-search > input.placeholder {
+		font-style: italic;
+		color: var(--spectrum-global-color-gray-600);
 	}
 </style>

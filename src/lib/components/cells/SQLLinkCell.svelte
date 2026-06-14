@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext, untrack } from 'svelte';
+	import { createEventDispatcher, getContext, untrack, tick } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
@@ -14,7 +14,7 @@
 	}
 
 	const dispatch = createEventDispatcher();
-	const { API } = getContext('sdk');
+	const { API, fetchData, QueryUtils } = getContext('sdk');
 	const EMPTY_FILTER = [];
 
 	let {
@@ -31,7 +31,12 @@
 
 	let anchor = $state<HTMLElement | null>(null);
 	let popup = $state<HTMLElement | null>(null);
-	let pickerApi = $state<{ focus?: () => void }>();
+	let popupSearchInput = $state<HTMLInputElement | null>(null);
+	let popupSearchTerm = $state('');
+	let pickerFetch = $state<ReturnType<typeof fetchData> | undefined>();
+	let pickerCurrentLimit = $state(15);
+	let pickerSearchTimer = $state<ReturnType<typeof setTimeout>>();
+	let focusIdx = $state(-1);
 	let open = $state(false);
 	let localValue = $state<SQLLinkItem[]>([]);
 	let originalValue = $state('[]');
@@ -59,6 +64,17 @@
 	let writable = $derived(!disabled && !readonly);
 	let isEmpty = $derived((localValue?.length ?? 0) < 1);
 	let tabindex = $state(0);
+	let showPopupSearch = $derived(fieldSchema?.recursiveTable ? !!config.search : true);
+	let isRecursiveTable = $derived(!!fieldSchema?.recursiveTable);
+	let relatedColumns = $derived(fieldSchema?.relatedColumns || []);
+	let pickerInitLimit = $derived(isRecursiveTable ? limit : 15);
+	let pickerPrimaryDisplay = $derived(
+		primaryDisplayField || $pickerFetch?.definition?.primaryDisplay || relatedField
+	);
+	let pickerIdColumn = $derived($pickerFetch?.definition?.primary?.[0] ?? '_id');
+	let pickerRows = $derived($pickerFetch?.rows ?? []);
+	let pickerLoading = $derived($pickerFetch?.loading ?? false);
+	let pickerLoaded = $derived($pickerFetch?.loaded ?? false);
 
 	const getEmittedLabel = () => {
 		if (!localValue.length) return null;
@@ -188,11 +204,20 @@
 			_enter: () => {
 				originalValue = JSON.stringify(localValue);
 				open = true;
+				focusIdx = -1;
+				pickerCurrentLimit = pickerInitLimit;
 				dispatch('enteredit');
-				setTimeout(() => pickerApi?.focus?.(), 0);
+				setTimeout(() => {
+					if (showPopupSearch) {
+						popupSearchInput?.focus();
+					}
+				}, 0);
 			},
 			_exit: () => {
 				open = false;
+				popupSearchTerm = '';
+				focusIdx = -1;
+				clearTimeout(pickerSearchTimer);
 				dispatch('exitedit');
 				if (!debounced) {
 					dispatch('change', localValue);
@@ -221,8 +246,8 @@
 					} else {
 						return this.cancel();
 					}
-				} else if (open) {
-					pickerApi?.focus?.();
+				} else if (open && showPopupSearch) {
+					popupSearchInput?.focus();
 				}
 			},
 			focusout: (e: FocusEvent) => {
@@ -239,14 +264,8 @@
 					anchor?.focus();
 					return 'view';
 				}
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					if (open) {
-						open = false;
-						anchor?.focus();
-					} else {
-						return this.cancel();
-					}
+				if (!isRecursiveTable) {
+					navigatePickerOptions(e);
 				}
 			},
 			selectChange: (nextValue: SQLLinkItem[]) => {
@@ -285,6 +304,192 @@
 	const handlePickerChange = (e: CustomEvent<SQLLinkItem[]>) => {
 		csm.selectChange(e.detail);
 	};
+
+	const extendQuery = (
+		baseQuery: Record<string, unknown>,
+		extensions: Record<string, unknown>
+	) => {
+		if (!Object.keys(extensions).length) {
+			return baseQuery;
+		}
+
+		const extended = {
+			$and: {
+				conditions: [...(baseQuery ? [baseQuery] : []), ...Object.values(extensions || {})]
+			},
+			onEmptyFilter: 'none'
+		};
+
+		return (extended.$and?.conditions?.length ?? 0) > 0 ? extended : {};
+	};
+
+	const buildPickerQuery = (term: string) => {
+		const defaultQuery = QueryUtils.buildQuery(resolvedFilter);
+
+		if (!term || !showPopupSearch) {
+			return defaultQuery;
+		}
+
+		if (relatedColumns.length > 0) {
+			return extendQuery(defaultQuery, {
+				search: {
+					$or: {
+						conditions: relatedColumns.map((col: { name: string }) => ({
+							fuzzy: {
+								[col.name]: term
+							}
+						}))
+					}
+				}
+			});
+		}
+
+		const displayField = primaryDisplayField || relatedField;
+
+		return extendQuery(defaultQuery, {
+			search: QueryUtils.buildQuery([
+				{
+					field: displayField,
+					type: 'string',
+					operator: 'fuzzy',
+					value: term,
+					valueType: 'Value'
+				}
+			])
+		});
+	};
+
+	const schedulePickerSearch = (term: string) => {
+		if (!pickerFetch) return;
+
+		clearTimeout(pickerSearchTimer);
+		pickerSearchTimer = setTimeout(() => {
+			pickerCurrentLimit = pickerInitLimit;
+			pickerFetch?.update({
+				query: buildPickerQuery(term),
+				limit: pickerCurrentLimit
+			});
+		}, 200);
+	};
+
+	const fetchMorePickerRows = () => {
+		if ($pickerFetch?.loading) return;
+		if (($pickerFetch?.rows?.length ?? 0) < pickerCurrentLimit) return;
+
+		pickerCurrentLimit += 100;
+		pickerFetch?.update({
+			query: buildPickerQuery(popupSearchTerm),
+			limit: pickerCurrentLimit
+		});
+	};
+
+	const selectPickerRow = (row: Record<string, unknown>) => {
+		const item = parseRow(row, pickerPrimaryDisplay);
+		if (!item) return;
+
+		let nextValue: SQLLinkItem[];
+		if (!multi) {
+			nextValue = localValue[0]?.[relatedField] == item[relatedField] ? [] : [item];
+		} else {
+			const pos = localValue.findIndex((v) => v[relatedField] == item[relatedField]);
+			nextValue =
+				pos > -1 ? localValue.filter((_, i) => i !== pos) : [...localValue, item];
+		}
+
+		csm.selectChange(nextValue);
+	};
+
+	const scrollHighlightedIntoView = async () => {
+		if (focusIdx < 0 || !popup) return;
+		await tick();
+		const highlighted = popup.querySelector('.option.highlighted, .data-row.highlighted');
+		highlighted?.scrollIntoView({ block: 'nearest' });
+	};
+
+	const navigatePickerOptions = (e: KeyboardEvent) => {
+		const fetchedRows = $pickerFetch?.rows ?? [];
+		const totalRows = localValue.length + fetchedRows.length;
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			focusIdx = Math.min(focusIdx + 1, totalRows - 1);
+			if (focusIdx < 0 && totalRows) focusIdx = 0;
+			scrollHighlightedIntoView();
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			focusIdx = Math.max(focusIdx - 1, 0);
+			scrollHighlightedIntoView();
+		} else if (e.key === 'Enter' && focusIdx > -1) {
+			e.preventDefault();
+			const row =
+				focusIdx < localValue.length
+					? localValue[focusIdx]
+					: fetchedRows[focusIdx - localValue.length];
+			if (row) selectPickerRow(row as Record<string, unknown>);
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			open = false;
+			anchor?.focus();
+		}
+	};
+
+	const handlePopupSearch = (e: Event) => {
+		popupSearchTerm = (e.target as HTMLInputElement).value;
+		const fetchedRows = $pickerFetch?.rows ?? [];
+		focusIdx =
+			popupSearchTerm && fetchedRows.length ? localValue.length : -1;
+		schedulePickerSearch(popupSearchTerm);
+	};
+
+	const clearPopupSearch = () => {
+		popupSearchTerm = '';
+		focusIdx = -1;
+		schedulePickerSearch('');
+	};
+
+	$effect(() => {
+		if ($csm !== 'editing' || !relatedTableId || !writable) {
+			pickerFetch = undefined;
+			return;
+		}
+
+		const initLimit = pickerInitLimit;
+		pickerCurrentLimit = initLimit;
+
+		untrack(() => {
+			pickerFetch = fetchData({
+				API,
+				datasource: {
+					type: 'table',
+					tableId: relatedTableId
+				},
+				options: {
+					query: buildPickerQuery(''),
+					limit: initLimit,
+					...(isRecursiveTable && config.sortColumn
+						? { sortColumn: config.sortColumn, sortOrder: config.sortOrder }
+						: {})
+				}
+			});
+		});
+	});
+
+	$effect(() => {
+		const fetchedRows = $pickerFetch?.rows ?? [];
+		const totalRows = localValue.length + fetchedRows.length;
+		if (totalRows) {
+			focusIdx = Math.min(focusIdx, totalRows - 1);
+		}
+	});
+
+	$effect(() => {
+		const definition = $pickerFetch?.definition;
+		if (!definition) return;
+
+		primaryDisplayField =
+			fieldSchema?.primaryDisplay ||
+			('primaryDisplay' in definition ? definition.primaryDisplay : undefined);
+	});
 
 	$effect(() => {
 		const raw = value;
@@ -391,27 +596,57 @@
 			on:focusout={csm.popupFocusout}
 			on:keydown={csm.popupKeydown}
 		>
-			{#if fieldSchema?.recursiveTable}
-				<LinkPickerTree
-					{fieldSchema}
-					filter={resolvedFilter}
-					search={config.search}
-					{limit}
-					joinColumn={config.joinColumn}
-					value={localValue}
-					{ownId}
-					{multi}
-					on:change={handlePickerChange}
-				/>
+			{#if showPopupSearch}
+				<div class="popup-search">
+					<i class="ph ph-magnifying-glass"></i>
+					<input
+						bind:this={popupSearchInput}
+						class="search"
+						class:placeholder={!popupSearchTerm}
+						type="text"
+						placeholder={'Search...'}
+						value={popupSearchTerm}
+						use:focus
+						on:input={handlePopupSearch}
+					/>
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<i
+						class="ph ph-x clear-icon"
+						on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
+					></i>
+				</div>
+			{/if}
+			{#if isRecursiveTable}
+				{#key `${pickerLoaded}-${pickerRows.length}`}
+					<LinkPickerTree
+						{fieldSchema}
+						rows={pickerRows}
+						loading={pickerLoading}
+						loaded={pickerLoaded}
+						primaryDisplay={pickerPrimaryDisplay}
+						idColumn={pickerIdColumn}
+						joinColumn={config.joinColumn}
+						value={localValue}
+						{ownId}
+						{multi}
+						on:change={handlePickerChange}
+					/>
+				{/key}
 			{:else}
-				<SQLLinkPicker
-					{fieldSchema}
-					filter={resolvedFilter}
-					{multi}
-					value={localValue}
-					bind:api={pickerApi}
-					on:change={handlePickerChange}
-				></SQLLinkPicker>
+				{#key `${pickerLoaded}-${pickerRows.length}`}
+					<SQLLinkPicker
+						{fieldSchema}
+						rows={pickerRows}
+						loading={pickerLoading}
+						loaded={pickerLoaded}
+						primaryDisplay={pickerPrimaryDisplay}
+						{multi}
+						value={localValue}
+						bind:focusIdx
+						on:change={handlePickerChange}
+						on:fetchmore={fetchMorePickerRows}
+					></SQLLinkPicker>
+				{/key}
 			{/if}
 		</div>
 	</SuperPopover>
@@ -507,5 +742,49 @@
 		flex-direction: column;
 		overflow: hidden;
 		min-width: 0;
+	}
+
+	.popup-search {
+		height: 2rem;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-shrink: 0;
+		padding: 0rem 0.75rem;
+	}
+
+	.popup-search > i {
+		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.clear-icon {
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: 4px;
+		color: var(--spectrum-global-color-red-400);
+	}
+
+	.clear-icon:hover {
+		background-color: var(--spectrum-global-color-gray-100);
+		color: var(--spectrum-global-color-red-700);
+	}
+
+	.popup-search > input {
+		flex: 1;
+		height: 100%;
+		max-width: 100%;
+		outline: none;
+		background: none;
+		border: none;
+		color: inherit;
+		padding-left: 0.5rem;
+		font-family: inherit;
+		font-size: inherit;
+	}
+
+	.popup-search > input.placeholder {
+		font-style: italic;
+		color: var(--spectrum-global-color-gray-600);
 	}
 </style>

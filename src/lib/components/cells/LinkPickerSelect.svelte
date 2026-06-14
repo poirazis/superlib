@@ -1,56 +1,22 @@
 <script>
-	import { getContext, createEventDispatcher } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-	const { API, fetchData, QueryUtils } = getContext('sdk');
 	const dispatch = createEventDispatcher();
 
 	let {
+		rows = [],
+		loading = false,
+		loaded = false,
+		primaryDisplay = 'email',
 		value = [],
-		fieldSchema,
-		filter = [],
 		wide = false,
 		singleSelect = false,
-		api = $bindable()
+		focusIdx = $bindable(-1)
 	} = $props();
 
-	let tableId = $derived(fieldSchema.tableId);
-	let isBBReference = $derived(fieldSchema?.type?.includes('bb_reference'));
-	let type = $derived(isBBReference ? 'user' : 'table');
 	let localValue = $derived(Array.isArray(value) ? value : []);
-
-	let appliedFilter = $state([]);
-	let focusIdx = $state(-1);
-	let control = $state();
-	let filterTerm = $state();
-	let initLimit = $state(15);
 	let listElement = $state();
-	let isInitialLoad = $state(true);
-
-	let fetch = $state();
-	let defaultQuery = $derived(QueryUtils.buildQuery(filter));
-
-	$effect(() => {
-		fetch = fetchData({
-			API,
-			datasource: {
-				type,
-				tableId: tableId
-			},
-			options: {
-				query: defaultQuery,
-				limit: 15
-			}
-		});
-	});
-
-	let primaryDisplay = $derived($fetch?.definition?.primaryDisplay || 'email');
-
-	$effect(() => {
-		if ($fetch?.rows) {
-			focusIdx = Math.min(focusIdx, $fetch.rows.length - 1);
-		}
-	});
 
 	const rowSelected = (val) => {
 		if (value) {
@@ -84,214 +50,129 @@
 		);
 	};
 
-	const handleSearch = (e) => {
-		filterTerm = e.target.value;
-
-		if (e.target.value) {
-			appliedFilter = [
-				...filter,
-				{
-					field: primaryDisplay,
-					type: 'string',
-					operator: 'fuzzy',
-					value: e.target.value,
-					valueType: 'Value'
-				}
-			];
-		} else {
-			appliedFilter = filter ?? [];
-		}
-
-		fetch?.update({
-			query: QueryUtils.buildQuery(appliedFilter)
-		});
-	};
-
-	const fetchMore = () => {
-		if ($fetch?.loading) return;
-		if (($fetch?.rows?.length ?? 0) < initLimit) return;
-		initLimit += 100;
-		fetch?.update({
-			limit: initLimit
-		});
-	};
-
 	const handleScroll = (e) => {
 		const element = e.target;
-		const scrollTop = element.scrollTop;
-		const scrollHeight = element.scrollHeight;
-		const clientHeight = element.clientHeight;
-
-		if (scrollTop + clientHeight >= scrollHeight - 50) {
-			fetchMore();
-		}
-	};
-
-	const handleNavigation = (e) => {
-		if (e.key == 'Escape') {
-			dispatch('close');
-		} else if (e.key == 'ArrowDown') {
-			e.preventDefault();
-			focusIdx += 1;
-			if (focusIdx > ($fetch?.rows?.length ?? 0) - 1) focusIdx = 0;
-		} else if (e.key == 'ArrowUp') {
-			e.preventDefault();
-			focusIdx -= 1;
-			if (focusIdx < 0) focusIdx = ($fetch?.rows?.length ?? 1) - 1;
-		} else if (e.key == 'Enter' && focusIdx > -1) {
-			selectRow($fetch.rows[focusIdx]);
+		if (element.scrollTop + element.clientHeight >= element.scrollHeight - 50) {
+			dispatch('fetchmore');
 		}
 	};
 
 	$effect(() => {
-		if (($fetch?.rows?.length ?? 0) > 0 && !isInitialLoad && listElement) {
-			const scrollHeight = listElement.scrollHeight;
-			const clientHeight = listElement.clientHeight;
-			if (scrollHeight <= clientHeight) {
-				fetchMore();
+		if ((rows?.length ?? 0) > 0 && loaded && listElement) {
+			if (listElement.scrollHeight <= listElement.clientHeight) {
+				dispatch('fetchmore');
 			}
 		}
 	});
 
-	api = {
-		focus: () => {
-			control?.focus();
-		},
-		hasFocus: () => {
-			return document.activeElement === control;
+	$effect(() => {
+		if (rows?.length) {
+			focusIdx = Math.min(focusIdx, rows.length - 1);
 		}
-	};
+	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore event_directive_deprecated -->
 <div class="control">
-	<div class="searchControl">
-		<i
-			class={$fetch?.loading && isInitialLoad
-				? 'ph ph-spinner spin'
-				: control?.value
-					? 'ri-filter-fill'
-					: 'ri-search-line'}
-			style:color={filterTerm
-				? 'var(--spectrum-global-color-blue-400)'
-				: 'var(--spectrum-global-color-gray-700)'}
-		></i>
-		<input
-			bind:this={control}
-			class="search"
-			class:placeholder={!filterTerm}
-			type="text"
-			placeholder={$fetch?.loading && !$fetch?.rows?.length && isInitialLoad
-				? 'Loading...'
-				: 'Search'}
-			on:input={handleSearch}
-			on:keydown={handleNavigation}
-			on:focusout
-		/>
-	</div>
-
-	{#if $fetch?.rows}
-		{#if wide}
-			<div class="listWrapper" on:mousedown|preventDefault={() => {}}>
-				<div class="list" bind:this={listElement} on:scroll={handleScroll}>
-					<div class="options">
-						{#key localValue}
-							{#if $fetch?.rows?.length || ($fetch?.loading && !isInitialLoad)}
-								{#each $fetch?.rows || [] as row, idx (idx)}
-									{#if !rowSelected(row)}
-										<div
-											class="option wide"
-											class:highlighted={focusIdx == idx}
-											on:mouseenter={() => (focusIdx = idx)}
-											on:mouseleave={() => (focusIdx = -1)}
-											on:mousedown|preventDefault|stopPropagation={() => selectRow(row)}
-										>
-											{row[primaryDisplay]}
-											<i class="ri-add-line"></i>
-										</div>
-									{/if}
+	{#if wide}
+		<div class="listWrapper" on:mousedown|preventDefault={() => {}}>
+			<div class="list" bind:this={listElement} on:scroll={handleScroll}>
+				<div class="options">
+					{#key localValue}
+						{#if rows?.length || (loading && loaded)}
+							{#each rows as row, idx (row._id ?? idx)}
+								{#if !rowSelected(row)}
+									<div
+										class="option wide"
+										class:highlighted={focusIdx == idx}
+										on:mouseenter={() => (focusIdx = idx)}
+										on:mouseleave={() => (focusIdx = -1)}
+										on:mousedown|preventDefault|stopPropagation={() => selectRow(row)}
+									>
+										{row[primaryDisplay]}
+										<i class="ri-add-line"></i>
+									</div>
+								{/if}
+							{/each}
+							{#if loading && loaded}
+								<div class="option wide loading">
+									<i class="ph ph-spinner spin"></i>
+									Loading more...
+								</div>
+							{/if}
+						{:else if loading}
+							<div class="option wide loading">
+								<i class="ph ph-spinner spin"></i>
+								Loading...
+							</div>
+						{:else}
+							<div class="option wide">No Results Found</div>
+						{/if}
+					{/key}
+				</div>
+			</div>
+			<div class="list listSelected">
+				<div class="options">
+					{#if localValue.length}
+						{#each localValue as val, idx (idx)}
+							{#if rowSelected(val)}
+								<div
+									transition:fly={{ x: -20, duration: 130 }}
+									class="option wide selected"
+									on:mousedown|stopPropagation|preventDefault={() => unselectRow(val)}
+								>
+									{val.primaryDisplay}
+									<i class="ri-close-line"></i>
+								</div>
+							{/if}
+						{/each}
+					{:else}
+						<span>Nothing Selected</span>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{:else}
+		<div class="listWrapper" on:mousedown|preventDefault={() => {}}>
+			<div class="list" bind:this={listElement} on:scroll={handleScroll}>
+				<div class="options">
+					{#key localValue}
+						{#key rows}
+							{#if rows?.length || (loading && !loaded)}
+								{#each rows as row, idx (row._id ?? idx)}
+									<div
+										class="option"
+										class:selected={rowSelected(row)}
+										class:highlighted={focusIdx == idx}
+										on:mouseenter={() => (focusIdx = idx)}
+										on:mouseleave={() => (focusIdx = -1)}
+										on:mousedown|preventDefault|stopPropagation={() => selectRow(row)}
+									>
+										{row[primaryDisplay]}
+										<i class="ri-check-line"></i>
+									</div>
 								{/each}
-								{#if $fetch?.loading && $fetch.loaded}
-									<div class="option wide loading">
+								{#if loading && loaded}
+									<div class="option loading">
 										<i class="ph ph-spinner spin"></i>
 										Loading more...
 									</div>
 								{/if}
-							{:else if $fetch?.loading}
-								<div class="option wide loading">
+							{:else if loading}
+								<div class="option loading">
 									<i class="ph ph-spinner spin"></i>
 									Loading...
 								</div>
 							{:else}
-								<div class="option wide">No Results Found</div>
+								<div class="option">No Results Found</div>
 							{/if}
 						{/key}
-					</div>
-				</div>
-				<div class="list listSelected">
-					<div class="options">
-						{#if localValue.length}
-							{#each localValue as val, idx (idx)}
-								{#if rowSelected(val)}
-									<div
-										transition:fly={{ x: -20, duration: 130 }}
-										class="option wide selected"
-										on:mousedown|stopPropagation|preventDefault={() => unselectRow(val)}
-									>
-										{val.primaryDisplay}
-										<i class="ri-close-line"></i>
-									</div>
-								{/if}
-							{/each}
-						{:else}
-							<span>Nothing Selected</span>
-						{/if}
-					</div>
+					{/key}
 				</div>
 			</div>
-		{:else}
-			<div class="listWrapper" on:mousedown|preventDefault={() => {}}>
-				<div class="list" bind:this={listElement} on:scroll={handleScroll}>
-					<div class="options">
-						{#key localValue}
-							{#key $fetch?.rows}
-								{#if $fetch?.rows?.length || ($fetch?.loading && !$fetch?.loaded)}
-									{#each $fetch?.rows || [] as row, idx (idx)}
-										<div
-											class="option"
-											class:selected={rowSelected(row)}
-											class:highlighted={focusIdx == idx}
-											on:mouseenter={() => (focusIdx = idx)}
-											on:mouseleave={() => (focusIdx = -1)}
-											on:mousedown|preventDefault|stopPropagation={() => selectRow(row)}
-										>
-											{row[primaryDisplay]}
-											<i class="ri-check-line"></i>
-										</div>
-									{/each}
-									{#if $fetch?.loading && $fetch.loaded}
-										<div class="option loading">
-											<i class="ph ph-spinner spin"></i>
-											Loading more...
-										</div>
-									{/if}
-								{:else if $fetch?.loading}
-									<div class="option loading">
-										<i class="ph ph-spinner spin"></i>
-										Loading...
-									</div>
-								{:else}
-									<div class="option">No Results Found</div>
-								{/if}
-							{/key}
-						{/key}
-					</div>
-				</div>
-			</div>
-		{/if}
+		</div>
 	{/if}
 </div>
 
@@ -304,39 +185,7 @@
 		justify-content: space-around;
 		gap: 0.25rem;
 		padding: 0.25rem;
-		padding-top: 0rem;
 		overflow-x: hidden;
-	}
-
-	.searchControl {
-		height: 2rem;
-		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
-		display: flex;
-		align-items: center;
-		padding-left: 0.5rem;
-		gap: 0.25rem;
-	}
-
-	.searchControl > i {
-		font-size: 14px;
-		transition: all 230ms;
-	}
-
-	.searchControl > input {
-		height: 100%;
-		width: 100%;
-		outline: none;
-		background: none;
-		border: none;
-		color: inherit;
-		padding-left: 0.5rem;
-		font-family: inherit;
-		font-size: inherit;
-	}
-
-	.searchControl > input.placeholder {
-		font-style: italic;
-		color: var(--spectrum-global-color-gray-600);
 	}
 
 	.listWrapper {

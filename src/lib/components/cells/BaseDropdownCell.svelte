@@ -620,17 +620,8 @@
 	<!-- svelte-ignore event_directive_deprecated -->
 	<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
 		{#if showPopupSearch}
-			<div class="searchControl">
-				<i
-					class={$fetch?.loading && isInitialLoad
-						? 'ph ph-spinner spin'
-						: popupSearchTerm
-							? 'ri-filter-fill'
-							: 'ri-search-line'}
-					style:color={popupSearchTerm
-						? 'var(--spectrum-global-color-blue-400)'
-						: 'var(--spectrum-global-color-gray-700)'}
-				></i>
+			<div class="popup-search">
+				<i class="ph ph-magnifying-glass"></i>
 				<input
 					bind:this={popupSearchInput}
 					class="search"
@@ -641,6 +632,11 @@
 					use:focus
 					on:input={handlePopupSearch}
 				/>
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<i
+					class="ph ph-x clear-icon"
+					on:mousedown|preventDefault|stopPropagation={() => (popupSearchTerm = '')}
+				></i>
 			</div>
 		{/if}
 
@@ -683,23 +679,35 @@
 		overflow: hidden;
 	}
 
-	.searchControl {
+	.popup-search {
 		height: 2rem;
 		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
 		display: flex;
 		align-items: center;
-		padding-left: 0.5rem;
 		gap: 0.25rem;
 		flex-shrink: 0;
+		padding: 0rem 0.75rem;
 	}
 
-	.searchControl > i {
-		font-size: 14px;
+	.popup-search > i {
+		color: var(--spectrum-global-color-gray-600);
 	}
 
-	.searchControl > input {
+	.clear-icon {
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: 4px;
+		color: var(--spectrum-global-color-red-400);
+	}
+	.clear-icon:hover {
+		background-color: var(--spectrum-global-color-gray-100);
+		color: var(--spectrum-global-color-red-700);
+	}
+
+	.popup-search > input {
+		flex: 1;
 		height: 100%;
-		width: 100%;
+		max-width: 100%;
 		outline: none;
 		background: none;
 		border: none;
@@ -709,7 +717,7 @@
 		font-size: inherit;
 	}
 
-	.searchControl > input.placeholder {
+	.popup-search > input.placeholder {
 		font-style: italic;
 		color: var(--spectrum-global-color-gray-600);
 	}
