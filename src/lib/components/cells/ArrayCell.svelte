@@ -20,6 +20,68 @@
 
 	const dispatch = createEventDispatcher();
 
+	const csm = fsm('view', {
+		'*': {
+			goTo(state) {
+				return state;
+			}
+		},
+		view: {
+			focus() {
+				if (!readonly && !disabled) {
+					return 'editing';
+				}
+			}
+		},
+		readonly: {},
+		disabled: {},
+		copyable: {
+			click() {
+				copyAndTransition(() => csm, displayText);
+			},
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.click();
+				}
+			}
+		},
+		justCopied: deferJustCopied(() => csm),
+		editing: {
+			_enter() {
+				originalValue = [...outputValue];
+				cellValues = enrichValue(value);
+				rowErrors = cellValues.map(() => '');
+				dispatch('enteredit');
+			},
+			_exit() {
+				brain.validateInstances();
+				dispatch('exitedit');
+			},
+			focusout(e: FocusEvent) {
+				const related = e.relatedTarget as Node | null;
+				if (related && anchor?.contains(related)) {
+					return;
+				}
+				dispatch('focusout');
+				return 'view';
+			},
+			cancel() {
+				cellValues = enrichValue(value);
+				rowErrors = cellValues.map(() => '');
+				focusedRowIndex = -1;
+				dispatch('cancel');
+				return 'view';
+			},
+			keydown(e: KeyboardEvent) {
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					this.cancel();
+				}
+			}
+		}
+	});
+
 	let zoneType = $state(generate());
 	let cellValues = $state<string[]>(['']);
 	let dragging = $state(false);
@@ -64,10 +126,7 @@
 	);
 	let displayText = $derived(outputValue.join(', '));
 	let showActions = $derived(
-		canEdit &&
-			!readonly &&
-			!disabled &&
-			!(parsedMin > 0 && parsedMax > 0 && parsedMin === parsedMax)
+		!dragging && $csm === 'editing' && !(parsedMin > 0 && parsedMax > 0 && parsedMin === parsedMax)
 	);
 	let useDnD = $derived(reorder !== 'disabled');
 	let dragDisabled = $derived(readonly || disabled);
@@ -85,77 +144,19 @@
 		};
 	};
 
-	const rowBackground = () => background ?? 'var(--spectrum-global-color-gray-50)';
-
-	const applyInlineStyles = (node: HTMLElement, styles: Record<string, string>) => {
-		Object.assign(node.style, styles);
-	};
-
-	const styleDraggedElement = (element: HTMLElement) => {
-		const bg = rowBackground();
-
-		applyInlineStyles(element, {
-			display: 'flex',
-			flexDirection: 'column',
-			overflow: 'hidden',
-			borderRadius: '0.25rem',
-			border: '1px solid var(--spectrum-global-color-gray-300)',
-			boxShadow: '0 4px 14px rgb(0 0 0 / 0.14)',
-			background: bg,
-			opacity: '0.98',
-			outline: '2px solid var(--spectrum-global-color-gray-300)'
-		});
-
-		const row = element.querySelector('.row') as HTMLElement | null;
-		if (row) {
-			applyInlineStyles(row, {
-				display: 'flex',
-				alignItems: 'stretch',
-				height: '2rem',
-				minHeight: '2rem',
-				overflow: 'hidden',
-				borderBottom: 'none',
-				background: bg
-			});
-		}
-
-		const handle = element.querySelector('.drag-handle') as HTMLElement | null;
-		if (handle) {
-			applyInlineStyles(handle, {
-				display: 'flex',
-				alignItems: 'center',
-				justifyContent: 'center',
-				alignSelf: 'stretch',
-				minWidth: '26px',
-				height: '100%',
-				borderRight: '1px solid var(--spectrum-global-color-gray-100)',
-				color: 'var(--spectrum-global-color-blue-400)',
-				background: bg,
-				fontWeight: '600'
-			});
-		}
-
-		const input = element.querySelector('input.editor') as HTMLElement | null;
-		if (input) {
-			applyInlineStyles(input, {
-				flex: '1 1 auto',
-				minWidth: '0',
-				maxWidth: '100%',
-				height: '100%',
-				border: 'none',
-				outline: 'none',
-				background: bg,
-				color: 'var(--spectrum-global-color-gray-800)',
-				fontSize: '13px',
-				padding: '0 0.75rem',
-				cursor: 'grabbing'
-			});
-		}
-
-		element.querySelectorAll('.action-buttons, .row-error-icon').forEach((node) => {
-			(node as HTMLElement).style.display = 'none';
-		});
-	};
+	function transformDraggedElement(draggedEl, data, index) {
+		// draggedEl.querySelector('.row').style.transform = 'rotate(10deg)';
+		draggedEl.style.backgroundColor = 'var(--spectrum-global-color-gray-100)';
+		draggedEl.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
+		draggedEl.style.border = '1px solid var(--spectrum-global-color-gray-300)';
+		draggedEl.style.borderRadius = '4px';
+		draggedEl.style.opacity = 1;
+		draggedEl.style.outline = 'none';
+		draggedEl.querySelector('.editor').style.backgroundColor = 'transparent';
+		draggedEl.querySelector('.editor').style.border = 'none';
+		draggedEl.querySelector('.editor').style.color = 'var(--spectrum-global-color-gray-900)';
+		draggedEl.querySelector('.action-buttons').style.display = 'none';
+	}
 
 	const dndZoneOptions = $derived({
 		items: draggableItems,
@@ -166,7 +167,7 @@
 		dragDisabled,
 		type: zoneType,
 		dropFromOthersDisabled: true,
-		transformDraggedElement: styleDraggedElement
+		transformDraggedElement
 	});
 
 	const enrichValue = (val: unknown): string[] => {
@@ -447,68 +448,6 @@
 		}
 	};
 
-	const csm = fsm('view', {
-		'*': {
-			goTo(state) {
-				return state;
-			}
-		},
-		view: {
-			focus() {
-				if (!readonly && !disabled) {
-					return 'editing';
-				}
-			}
-		},
-		readonly: {},
-		disabled: {},
-		copyable: {
-			click() {
-				copyAndTransition(() => csm, displayText);
-			},
-			keydown(e: KeyboardEvent) {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					this.click();
-				}
-			}
-		},
-		justCopied: deferJustCopied(() => csm),
-		editing: {
-			_enter() {
-				originalValue = [...outputValue];
-				cellValues = enrichValue(value);
-				rowErrors = cellValues.map(() => '');
-				dispatch('enteredit');
-			},
-			_exit() {
-				brain.validateInstances();
-				dispatch('exitedit');
-			},
-			focusout(e: FocusEvent) {
-				const related = e.relatedTarget as Node | null;
-				if (related && anchor?.contains(related)) {
-					return;
-				}
-				dispatch('focusout');
-				return 'view';
-			},
-			cancel() {
-				cellValues = enrichValue(value);
-				rowErrors = cellValues.map(() => '');
-				focusedRowIndex = -1;
-				dispatch('cancel');
-				return 'view';
-			},
-			keydown(e: KeyboardEvent) {
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					this.cancel();
-				}
-			}
-		}
-	});
-
 	$effect(() => {
 		void reorder;
 
@@ -692,58 +631,56 @@
 	multirow={true}
 	isDirty={isDirty && showDirty}
 >
-	{#key reorder}
-		{#if useDnD}
-			{#if reorder === 'handle'}
-				<div
-					class="cells"
-					class:view-mode={!canEdit}
-					tabindex="-1"
-					use:dragHandleZone={dndZoneOptions}
-					on:consider={brain.handleDndConsider}
-					on:finalize={brain.handleDndFinalize}
-				>
-					{#each draggableItems as draggableItem, idx (draggableItem.id)}
-						{@render dndRow(draggableItem, idx)}
-					{/each}
-				</div>
-			{:else}
-				<div
-					class="cells"
-					class:view-mode={!canEdit}
-					tabindex="-1"
-					use:dndzone={dndZoneOptions}
-					on:consider={brain.handleDndConsider}
-					on:finalize={brain.handleDndFinalize}
-				>
-					{#each draggableItems as draggableItem, idx (draggableItem.id)}
-						{@render dndRow(draggableItem, idx)}
-					{/each}
-				</div>
-			{/if}
+	{#if useDnD}
+		{#if reorder === 'handle'}
+			<div
+				class="cells"
+				class:view-mode={!canEdit}
+				tabindex="-1"
+				use:dragHandleZone={dndZoneOptions}
+				on:consider={brain.handleDndConsider}
+				on:finalize={brain.handleDndFinalize}
+			>
+				{#each draggableItems as draggableItem, idx (draggableItem.id)}
+					{@render dndRow(draggableItem, idx)}
+				{/each}
+			</div>
 		{:else}
-			<div class="cells" class:view-mode={!canEdit} tabindex="-1">
-				{#each cellValues as _, idx (idx)}
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<!-- svelte-ignore event_directive_deprecated -->
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div
-						class="row"
-						tabindex={rowLocked ? -1 : 0}
-						class:focused={canEdit && focusedRowIndex === idx}
-						on:keydown={(e) => brain.handleKeyDown(e, idx)}
-						on:focusin={() => {
-							if (!rowLocked) focusedRowIndex = idx;
-						}}
-						on:focusout={brain.handleRowFocusOut}
-					>
-						{@render rowInput(idx, cellValues[idx])}
-						{@render rowActions(idx)}
-					</div>
+			<div
+				class="cells"
+				class:view-mode={!canEdit}
+				tabindex="-1"
+				use:dndzone={dndZoneOptions}
+				on:consider={brain.handleDndConsider}
+				on:finalize={brain.handleDndFinalize}
+			>
+				{#each draggableItems as draggableItem, idx (draggableItem.id)}
+					{@render dndRow(draggableItem, idx)}
 				{/each}
 			</div>
 		{/if}
-	{/key}
+	{:else}
+		<div class="cells" class:view-mode={!canEdit} tabindex="-1">
+			{#each cellValues as _, idx (idx)}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<!-- svelte-ignore event_directive_deprecated -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<div
+					class="row"
+					tabindex={rowLocked ? -1 : 0}
+					class:focused={canEdit && focusedRowIndex === idx}
+					on:keydown={(e) => brain.handleKeyDown(e, idx)}
+					on:focusin={() => {
+						if (!rowLocked) focusedRowIndex = idx;
+					}}
+					on:focusout={brain.handleRowFocusOut}
+				>
+					{@render rowInput(idx, cellValues[idx])}
+					{@render rowActions(idx)}
+				</div>
+			{/each}
+		</div>
+	{/if}
 </BaseCell>
 
 <style>
