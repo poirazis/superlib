@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, untrack } from 'svelte';
+	import { getContext, untrack, tick } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
@@ -14,17 +14,18 @@
 
 	let anchor = $state<HTMLElement | null>(null);
 	let popup = $state<HTMLElement | null>(null);
-	let searchInput = $state<HTMLInputElement | null>(null);
+	let editor = $state<HTMLInputElement | null>(null);
+	let listElement = $state<HTMLElement | null>(null);
 	let options = $state<string[]>([]);
 	let filteredOptions = $state<string[]>([]);
-	let focusedOptionIdx = $state(-1);
+	let focusIdx = $state(-1);
 	let timer = $state<ReturnType<typeof setTimeout>>();
+	let searchTimer = $state<ReturnType<typeof setTimeout>>();
 	let initLimit = $state(30);
 	let isInitialLoad = $state(true);
 	let isFetchMore = $state(false);
 	let localValue = $state<string[]>([]);
-	let newTag = $state<string | null>(null);
-	let searchTerm = $state('');
+	let filterTerm = $state('');
 	let open = $state(false);
 	let originalValue = $state('[]');
 	let fetch = $state<ReturnType<typeof fetchData>>();
@@ -54,6 +55,8 @@
 	let inEdit = $derived($csm === 'editing');
 	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
 	let tabindex = $state(0);
+
+	let displayOptions = $derived(filteredOptions.filter((option) => !localValue.includes(option)));
 
 	let tagColors = $derived.by(() => {
 		const colors: Record<string, string> = {};
@@ -110,6 +113,42 @@
 		}
 	};
 
+	const clearInputState = () => {
+		filterTerm = '';
+		if (editor) editor.value = '';
+		focusIdx = -1;
+		open = false;
+	};
+
+	const syncPopupState = (term: string) => {
+		if (!suggestions || !term.trim()) {
+			open = false;
+			focusIdx = -1;
+			return;
+		}
+
+		open = displayOptions.length > 0 || !!$fetch?.loading;
+		focusIdx = open && displayOptions.length ? 0 : -1;
+	};
+
+	const commitInput = () => {
+		const term = (editor?.value ?? filterTerm).trim();
+		if (!term && focusIdx < 0) return;
+
+		if (focusIdx > -1 && displayOptions[focusIdx]) {
+			addUniqueTags([displayOptions[focusIdx]]);
+		} else if (term) {
+			addUniqueTags(
+				term
+					.split(',')
+					.map((tag) => tag.trim())
+					.filter(Boolean)
+			);
+		}
+
+		clearInputState();
+	};
+
 	const loadOptionsFromRows = (rows: Record<string, unknown>[] | undefined) => {
 		if (isFetchMore) {
 			if (rows?.length) {
@@ -136,26 +175,27 @@
 	const toggleOption = (optionOrIdx: string | number) => {
 		if (disabled || readonly) return;
 
-		const option = typeof optionOrIdx === 'number' ? filteredOptions[optionOrIdx] : optionOrIdx;
+		const option = typeof optionOrIdx === 'number' ? displayOptions[optionOrIdx] : optionOrIdx;
 		if (!option) return;
 
 		const pos = localValue.indexOf(option);
 		if (pos > -1) {
 			localValue = localValue.filter((_, index) => index !== pos);
-		} else {
-			addUniqueTags([option]);
-			return;
+			emitChange();
 		}
-
-		emitChange();
-		fetchMoreIfNeeded();
 	};
 
-	const filterOptions = (term: string) => {
-		searchTerm = term;
-		newTag = term.trim() || null;
+	const selectSuggestion = (option: string) => {
+		addUniqueTags([option]);
+		clearInputState();
+		setTimeout(() => editor?.focus(), 0);
+	};
 
-		if (suggestions) {
+	const scheduleDataSearch = (term: string) => {
+		if (!fetch || !suggestions) return;
+
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
 			const appliedFilter = term
 				? [
 						...(filter || []),
@@ -173,7 +213,16 @@
 			fetch?.update({
 				query: QueryUtils.buildQuery(appliedFilter)
 			});
+		}, debounceDelay || 250);
+	};
+
+	const filterOptions = (term: string) => {
+		filterTerm = term;
+
+		if (suggestions) {
+			scheduleDataSearch(term);
 			filteredOptions = [...options];
+			syncPopupState(term);
 			return;
 		}
 
@@ -184,6 +233,13 @@
 		} else {
 			filteredOptions = [...options];
 		}
+
+		syncPopupState(term);
+	};
+
+	const handleEditorInput = () => {
+		const term = editor?.value ?? '';
+		filterOptions(term);
 	};
 
 	const fetchMore = () => {
@@ -195,12 +251,7 @@
 	};
 
 	const fetchMoreIfNeeded = () => {
-		const visibleOptions = filteredOptions.filter((option) => !localValue.includes(option));
-		if (
-			visibleOptions.length < 10 &&
-			!$fetch?.loading &&
-			($fetch?.rows?.length ?? 0) >= initLimit
-		) {
+		if (displayOptions.length < 10 && !$fetch?.loading && ($fetch?.rows?.length ?? 0) >= initLimit) {
 			fetchMore();
 		}
 	};
@@ -212,122 +263,77 @@
 		}
 	};
 
-	const openPicker = () => {
-		open = true;
-		focusedOptionIdx = -1;
-		setTimeout(() => {
-			searchInput?.focus();
-			filterOptions(searchTerm);
-		}, 0);
+	const scrollHighlightedIntoView = async () => {
+		if (focusIdx < 0 || !listElement) return;
+		await tick();
+		const highlighted = listElement.querySelector('.option.highlighted');
+		highlighted?.scrollIntoView({ block: 'nearest' });
 	};
 
-	const closePicker = () => {
-		if (newTag?.trim() && filteredOptions.length === 0) {
-			addUniqueTags(
-				newTag
-					.split(',')
-					.map((tag) => tag.trim())
-					.filter(Boolean)
-			);
-		}
-		searchTerm = '';
-		newTag = null;
-		open = false;
-	};
+	const navigateOptions = (e: KeyboardEvent) => {
+		const opts = displayOptions;
 
-	const handleInputKeyboard = (e: KeyboardEvent) => {
-		if (e.key === 'Enter') {
-			if (newTag?.trim()) {
-				addUniqueTags(
-					newTag
-						.split(',')
-						.map((tag) => tag.trim())
-						.filter(Boolean)
-				);
-				newTag = null;
-				searchTerm = '';
-				setTimeout(() => searchInput?.focus(), 0);
-			}
+		if (e.key === 'ArrowDown') {
+			if (!suggestions) return;
 			e.preventDefault();
+			if (!open) {
+				const term = (editor?.value ?? filterTerm).trim();
+				if (!term) return;
+				open = opts.length > 0 || !!$fetch?.loading;
+				focusIdx = opts.length ? 0 : -1;
+				return;
+			}
+			focusIdx = Math.min(focusIdx + 1, opts.length - 1);
+			if (focusIdx < 0 && opts.length) focusIdx = 0;
+			scrollHighlightedIntoView();
 			return;
 		}
 
-		if (e.key === ' ') {
-			if (focusedOptionIdx > -1) {
-				toggleOption(focusedOptionIdx);
-				e.preventDefault();
-			}
+		if (e.key === 'ArrowUp') {
+			if (!suggestions || !open) return;
+			e.preventDefault();
+			focusIdx = Math.max(focusIdx - 1, 0);
+			scrollHighlightedIntoView();
+			return;
+		}
+
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			commitInput();
+			setTimeout(() => editor?.focus(), 0);
 			return;
 		}
 
 		if (e.key === 'Tab') {
-			anchor?.focus();
-			closePicker();
-			e.preventDefault();
-			return;
-		}
-
-		if (e.key === 'Escape') {
-			newTag = null;
-			closePicker();
-			anchor?.focus();
-			e.preventDefault();
-			e.stopPropagation();
-			return;
-		}
-
-		if (e.key === 'ArrowDown') {
-			focusedOptionIdx = Math.min(focusedOptionIdx + 1, filteredOptions.length - 1);
-			if (focusedOptionIdx < 0) focusedOptionIdx = 0;
-			e.stopPropagation();
-		}
-
-		if (e.key === 'ArrowUp') {
-			focusedOptionIdx = Math.max(focusedOptionIdx - 1, 0);
-			e.preventDefault();
-			e.stopPropagation();
-		}
-	};
-
-	const handleCellKeyboard = (e: KeyboardEvent) => {
-		if ($csm !== 'editing') return;
-
-		if (e.keyCode === 32) {
-			if (focusedOptionIdx > -1) {
-				toggleOption(focusedOptionIdx);
-			} else if (!open) {
-				openPicker();
-				e.preventDefault();
-			}
-		}
-
-		if (e.key === 'Escape') {
 			if (open) {
-				closePicker();
+				open = false;
+				focusIdx = -1;
+			}
+			return;
+		}
+
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
+			if (open) {
+				open = false;
+				focusIdx = -1;
+				editor?.focus();
 			} else {
 				localValue = JSON.parse(originalValue);
+				clearInputState();
 				anchor?.blur();
 				csm.goTo('view');
 			}
+			return;
 		}
 
-		if (e.key === 'Enter' || e.key === 'Tab') {
-			if (focusedOptionIdx > -1 && filteredOptions[focusedOptionIdx]) {
-				toggleOption(focusedOptionIdx);
-			}
+		if (e.key === 'Backspace' && !(editor?.value ?? filterTerm) && localValue.length) {
+			localValue = localValue.slice(0, -1);
+			emitChange();
 		}
 
-		if (e.key === 'ArrowDown' && !open) {
-			openPicker();
-			focusedOptionIdx = 0;
-		}
-
-		if (e.key === 'ArrowUp' && open) {
-			focusedOptionIdx = Math.max(focusedOptionIdx - 1, 0);
-			e.preventDefault();
-		}
-
-		if (controlType === 'select' && e.key === 'Backspace' && !open) {
+		if (controlType === 'select' && e.key === 'Backspace' && !(editor?.value ?? filterTerm) && !open) {
 			localValue = [];
 			emitChange();
 		}
@@ -346,9 +352,13 @@
 			_enter: () => {
 				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
 				dispatch('enteredit');
+				setTimeout(() => editor?.focus(), 0);
 			},
 			_exit: () => {
-				closePicker();
+				if ((editor?.value ?? filterTerm).trim()) {
+					commitInput();
+				}
+				clearInputState();
 				dispatch('exitedit');
 				if (isDirty) {
 					emitChange(true);
@@ -356,6 +366,7 @@
 			},
 			focusout: (e: FocusEvent) => {
 				const related = e.relatedTarget as Node | null;
+				if (related === editor) return;
 				if (popup?.contains(related)) return;
 				return 'view';
 			},
@@ -366,13 +377,14 @@
 			popupKeydown(e: KeyboardEvent) {
 				if (e.key === 'Tab') {
 					e.preventDefault();
-					anchor?.focus();
-					closePicker();
+					editor?.focus();
+					open = false;
+					focusIdx = -1;
 					return 'view';
 				}
-				handleInputKeyboard(e);
+				navigateOptions(e);
 			},
-			keydown: handleCellKeyboard
+			keydown: navigateOptions
 		},
 		readonly: {},
 		disabled: {},
@@ -438,9 +450,21 @@
 	});
 
 	$effect(() => {
-		if (filteredOptions.length && suggestions && !$fetch?.loading) {
+		void displayOptions;
+		void filterTerm;
+		if (suggestions && inEdit && filterTerm.trim()) {
+			syncPopupState(filterTerm);
+		}
+	});
+
+	$effect(() => {
+		if (displayOptions.length && suggestions && !$fetch?.loading) {
 			setTimeout(() => fetchMoreIfNeeded(), 0);
 		}
+	});
+
+	$effect(() => {
+		focusIdx = Math.min(focusIdx, Math.max(displayOptions.length - 1, -1));
 	});
 
 	$effect(() => {
@@ -464,6 +488,7 @@
 
 		return () => {
 			if (timer) clearTimeout(timer);
+			if (searchTimer) clearTimeout(searchTimer);
 		};
 	});
 </script>
@@ -510,17 +535,24 @@
 			{/each}
 
 			{#if inEdit}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<i
-					class="ph ph-plus action-icon"
-					on:mousedown|preventDefault|stopPropagation={() => (open ? closePicker() : openPicker())}
-				></i>
+				<!-- svelte-ignore event_directive_deprecated -->
+				<input
+					bind:this={editor}
+					class="editor tag-input"
+					type="text"
+					{tabindex}
+					placeholder={isEmpty ? placeholder || 'Add tag...' : ''}
+					value={filterTerm}
+					on:input={handleEditorInput}
+					on:keydown={csm.keydown}
+					on:focusout={csm.focusout}
+				/>
 			{/if}
 		</div>
 	</div>
 </BaseCell>
 
-{#if inEdit}
+{#if inEdit && suggestions && open}
 	<!-- svelte-ignore event_directive_deprecated -->
 	<SuperPopover useAnchorWidth maxHeight={250} {anchor} {open} dismissible={false}>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -531,75 +563,45 @@
 			on:focusout={csm.popupFocusout}
 			on:keydown={csm.popupKeydown}
 		>
-			<div class="editor">
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore event_directive_deprecated -->
-				<div class="search-control">
-					<i
-						class={suggestions ? 'ph ph-magnifying-glass' : 'ph ph-pencil-simple'}
-						class:action-icon={true}
-					></i>
-					<input
-						type="text"
-						placeholder={suggestions ? 'Search or Add' : 'Enter tag...'}
-						class="search-input"
-						bind:value={searchTerm}
-						bind:this={searchInput}
-						on:input={(e) => filterOptions((e.target as HTMLInputElement).value)}
-					/>
-				</div>
-
-				{#if suggestions}
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<!-- svelte-ignore event_directive_deprecated -->
-					<div
-						class="options"
-						on:wheel={(e) => e.stopPropagation()}
-						on:mouseleave={() => (focusedOptionIdx = -1)}
-						on:scroll={handleScroll}
-						on:mousedown|preventDefault|stopPropagation
-					>
-						{#if $fetch?.loading && !$fetch?.rows?.length}
-							<div class="option loading">
-								<i class="ph ph-spinner spin"></i>
-								Loading...
-							</div>
-						{:else if filteredOptions.length}
-							{#each filteredOptions as option, idx (option)}
-								{#if !localValue.includes(option)}
-									<!-- svelte-ignore a11y_no_static_element_interactions -->
-									<div
-										class="option"
-										class:text={optionsViewMode === 'text'}
-										class:focused={focusedOptionIdx === idx}
-										style:--option-color={tagColors[option]}
-										on:mousedown|preventDefault={() => toggleOption(idx)}
-										on:mouseenter={() => (focusedOptionIdx = idx)}
-									>
-										<span>
-											{#if optionsViewMode !== 'text'}
-												<i class="ri-checkbox-blank-fill"></i>
-											{/if}
-											{option}
-										</span>
-									</div>
-								{/if}
-							{/each}
-							{#if $fetch?.loading}
-								<div class="option loading">
-									<i class="ph ph-spinner spin"></i>
-									Loading more...
-								</div>
-							{/if}
-						{:else}
-							<div class="option not-found">
-								<span>
-									<i class="ri-close-line"></i>
-									No matches found, Tag will be added as new
-								</span>
-							</div>
-						{/if}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
+			<div
+				class="options"
+				bind:this={listElement}
+				on:wheel={(e) => e.stopPropagation()}
+				on:scroll={handleScroll}
+				on:mousedown|preventDefault|stopPropagation
+			>
+				{#if $fetch?.loading && !displayOptions.length}
+					<div class="option loading">
+						<i class="ph ph-spinner spin"></i>
+						Loading...
 					</div>
+				{:else if displayOptions.length}
+					{#each displayOptions as option, idx (option)}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="option"
+							class:text={optionsViewMode === 'text'}
+							class:highlighted={focusIdx === idx}
+							style:--option-color={tagColors[option]}
+							on:mousedown|preventDefault={() => selectSuggestion(option)}
+							on:mouseenter={() => (focusIdx = idx)}
+						>
+							<span>
+								{#if optionsViewMode !== 'text'}
+									<i class="ri-checkbox-blank-fill"></i>
+								{/if}
+								{option}
+							</span>
+						</div>
+					{/each}
+					{#if $fetch?.loading}
+						<div class="option loading">
+							<i class="ph ph-spinner spin"></i>
+							Loading more...
+						</div>
+					{/if}
 				{/if}
 			</div>
 		</div>
@@ -675,16 +677,16 @@
 		transition: all 0.2s ease-in-out;
 	}
 
-	.search-control {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0rem 0.5rem;
-	}
-
-	.search-control:focus-within > .action-icon {
-		color: var(--spectrum-global-color-blue-600);
-		font-weight: 800;
+	.tag-input {
+		flex: 1 1 4rem;
+		min-width: 4rem;
+		width: auto;
+		height: 1.5rem;
+		padding: 0.125rem 0.25rem !important;
+		font-size: 12px;
+		background: transparent !important;
+		text-transform: none;
+		font-weight: normal;
 	}
 
 	.options {
@@ -694,7 +696,6 @@
 		overflow-y: auto;
 		max-height: 200px;
 		color: var(--spectrum-global-color-gray-700);
-		border-top: 1px solid var(--spectrum-global-color-gray-200);
 	}
 
 	.option {
@@ -707,16 +708,15 @@
 	}
 
 	.option:hover,
-	.option.focused {
+	.option.highlighted {
 		background-color: var(--spectrum-global-color-gray-75);
 		cursor: pointer;
 	}
 
-	.option.focused {
+	.option.highlighted {
 		color: var(--spectrum-global-color-gray-800);
 	}
 
-	.option.not-found,
 	.option.loading {
 		justify-content: center;
 		color: var(--spectrum-global-color-gray-500);
@@ -735,30 +735,5 @@
 	.option > span > i {
 		font-size: 16px;
 		color: var(--option-color, var(--spectrum-global-color-gray-300));
-	}
-
-	.action-icon {
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		font-size: 0.85rem;
-		color: var(--spectrum-global-color-gray-600);
-	}
-
-	.action-icon:hover {
-		cursor: pointer;
-		color: var(--spectrum-global-color-blue-600);
-		font-weight: 800;
-	}
-
-	.search-input {
-		width: 100%;
-		background: inherit;
-		font: inherit;
-		color: inherit;
-		border: none;
-		outline: none;
-		padding: 0.5rem;
-		box-sizing: border-box;
 	}
 </style>
