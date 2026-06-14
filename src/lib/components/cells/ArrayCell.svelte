@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, tick } from 'svelte';
-	import { dndzone, dragHandleZone, dragHandle } from 'svelte-dnd-action';
+	import { draggable, droppable, type DragDropState } from '@thisux/sveltednd';
 	import { generate } from 'shortid';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
@@ -20,15 +20,15 @@
 
 	const dispatch = createEventDispatcher();
 
-	let zoneType = $state(generate());
+	type ArrayRow = { id: string; value: string; index: number };
+
 	let cellValues = $state<string[]>(['']);
 	let dragging = $state(false);
 	let focusedRowIndex = $state(-1);
 	let inputRefs = $state<Record<number, HTMLInputElement>>({});
 	let anchor = $state<HTMLElement | null>(null);
 	let rowErrors = $state<string[]>([]);
-	let draggableItems = $state<Array<{ id: string; value: string; index: number }>>([]);
-	let rowIds = $state<string[]>([]);
+	let rowIds = $state<string[]>([generate()]);
 	let originalValue = $state<string[]>([]);
 	let tabindex = $state(0);
 
@@ -85,22 +85,10 @@
 		};
 	};
 
-	const styleDraggedRow = (element: HTMLElement) => {
-		element.querySelectorAll('.action-buttons, .row-error-icon').forEach((node) => {
-			(node as HTMLElement).style.display = 'none';
-		});
-	};
-
-	const dndZoneOptions = $derived({
-		items: draggableItems,
-		dropTargetStyle: {
-			outline: 'none',
-			border: '1px dashed var(--spectrum-global-color-blue-700)'
-		},
-		dragDisabled,
-		type: zoneType,
-		dropFromOthersDisabled: true,
-		transformDraggedElement: styleDraggedRow
+	const rowDragData = (idx: number): ArrayRow => ({
+		id: rowIds[idx],
+		value: cellValues[idx],
+		index: idx
 	});
 
 	const enrichValue = (val: unknown): string[] => {
@@ -253,17 +241,35 @@
 			if (focusedRowIndex >= 0) focusRow(focusedRowIndex);
 			commitValue();
 		},
-		handleDndConsider: (e: CustomEvent<{ items: typeof draggableItems }>) => {
+		handleDragStart: () => {
 			dragging = true;
 			focusedRowIndex = -1;
-			draggableItems = e.detail.items;
 		},
-		handleDndFinalize: (e: CustomEvent<{ items: typeof draggableItems }>) => {
+		handleDragEnd: () => {
+			dragging = false;
+		},
+		handleDrop: (state: DragDropState<ArrayRow>) => {
+			if (dragDisabled || !canEdit) return;
+
+			const { draggedItem, targetContainer, dropPosition } = state;
+			const dragIndex = rowIds.indexOf(draggedItem.id);
+			let dropIndex = parseInt(targetContainer ?? '0', 10);
+			if (dropPosition === 'after') dropIndex += 1;
+
+			if (dragIndex === -1 || Number.isNaN(dropIndex)) return;
+
+			const nextValues = [...cellValues];
+			const nextIds = [...rowIds];
+			const [value] = nextValues.splice(dragIndex, 1);
+			const [id] = nextIds.splice(dragIndex, 1);
+			const adjusted = dragIndex < dropIndex ? dropIndex - 1 : dropIndex;
+			nextValues.splice(adjusted, 0, value);
+			nextIds.splice(adjusted, 0, id);
+
 			dragging = false;
 			focusedRowIndex = -1;
-			draggableItems = e.detail.items;
-			cellValues = draggableItems.map((item) => item.value);
-			rowIds = draggableItems.map((item) => item.id);
+			cellValues = nextValues;
+			rowIds = nextIds;
 			commitValue();
 		},
 		handleRemove: (idx: number) => {
@@ -448,7 +454,6 @@
 
 		dragging = false;
 		focusedRowIndex = -1;
-		zoneType = generate();
 	});
 
 	$effect(() => {
@@ -480,19 +485,6 @@
 
 		if (ids !== rowIds) {
 			rowIds = ids;
-		}
-
-		const next = cellValues.map((item, index) => ({
-			id: rowIds[index],
-			value: item,
-			index
-		}));
-
-		const currentValues = draggableItems.map((item) => item.value);
-		const nextValues = next.map((item) => item.value);
-
-		if (JSON.stringify(currentValues) !== JSON.stringify(nextValues)) {
-			draggableItems = next;
 		}
 	});
 
@@ -580,36 +572,66 @@
 	{/if}
 {/snippet}
 
-{#snippet dndRow(draggableItem: (typeof draggableItems)[number], idx: number)}
+{#snippet arrayRowBody(idx: number, rowValue: string, dndEnabled: boolean)}
+	{#if dndEnabled && (reorder === 'handle' || reorder === 'full')}
+		<!-- svelte-ignore a11y_interactive_supports_focus -->
+		<div
+			class="drag-handle"
+			class:locked={readonly || disabled}
+			aria-label="Drag to reorder row {idx + 1}"
+		>
+			<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}></i>
+		</div>
+	{/if}
+	{@render rowInput(idx, rowValue)}
+	{@render rowActions(idx)}
+{/snippet}
+
+{#snippet arrayRow(idx: number, rowValue: string, dndEnabled: boolean)}
 	<div
 		class="row-shell"
 		style:--array-row-bg={background ?? 'var(--spectrum-global-color-gray-50)'}
+		use:draggable={{
+			container: idx.toString(),
+			dragData: rowDragData(idx),
+			disabled: !dndEnabled || dragDisabled,
+			handle: dndEnabled && reorder === 'handle' ? '.drag-handle' : undefined,
+			interactive: ['.action-buttons', '.simple-button', 'input.editor'],
+			callbacks: {
+				onDragStart: brain.handleDragStart,
+				onDragEnd: brain.handleDragEnd
+			},
+			attributes: { draggingClass: 'array-row-dragging' }
+		}}
+		use:droppable={{
+			container: idx.toString(),
+			disabled: !dndEnabled || dragDisabled,
+			direction: 'vertical',
+			callbacks: { onDrop: brain.handleDrop },
+			attributes: { dragOverClass: 'array-row-drag-over' }
+		}}
 	>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<!-- svelte-ignore event_directive_deprecated -->
-		<div class="row" class:focused={canEdit && focusedRowIndex === idx}>
-			{#if reorder === 'handle' || reorder === 'full'}
-				<!-- svelte-ignore a11y_interactive_supports_focus -->
-				{#if reorder === 'handle'}
-					<div
-						class="drag-handle"
-						class:locked={readonly || disabled}
-						aria-label="Drag to reorder row {idx + 1}"
-						use:dragHandle
-					>
-						<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
-						></i>
-					</div>
-				{:else}
-					<div class="drag-handle" class:locked={readonly || disabled}>
-						<i class={focusedRowIndex == idx ? 'ph ph-pencil-simple' : 'ph ph-dots-six-vertical'}
-						></i>
-					</div>
-				{/if}
-			{/if}
-			{@render rowInput(idx, draggableItem.value)}
-			{@render rowActions(idx)}
-		</div>
+		{#if dndEnabled}
+			<div class="row" class:focused={canEdit && focusedRowIndex === idx}>
+				{@render arrayRowBody(idx, rowValue, dndEnabled)}
+			</div>
+		{:else}
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
+			<div
+				class="row"
+				tabindex={rowLocked ? -1 : 0}
+				class:focused={canEdit && focusedRowIndex === idx}
+				on:keydown={(e) => brain.handleKeyDown(e, idx)}
+				on:focusin={() => {
+					if (!rowLocked) focusedRowIndex = idx;
+				}}
+				on:focusout={brain.handleRowFocusOut}
+			>
+				{@render arrayRowBody(idx, rowValue, dndEnabled)}
+			</div>
+		{/if}
 	</div>
 {/snippet}
 
@@ -629,58 +651,11 @@
 	multirow={true}
 	isDirty={isDirty && showDirty}
 >
-	{#key reorder}
-		{#if useDnD}
-			{#if reorder === 'handle'}
-				<div
-					class="cells"
-					class:view-mode={!canEdit}
-					tabindex="-1"
-					use:dragHandleZone={dndZoneOptions}
-					on:consider={brain.handleDndConsider}
-					on:finalize={brain.handleDndFinalize}
-				>
-					{#each draggableItems as draggableItem, idx (draggableItem.id)}
-						{@render dndRow(draggableItem, idx)}
-					{/each}
-				</div>
-			{:else}
-				<div
-					class="cells"
-					class:view-mode={!canEdit}
-					tabindex="-1"
-					use:dndzone={dndZoneOptions}
-					on:consider={brain.handleDndConsider}
-					on:finalize={brain.handleDndFinalize}
-				>
-					{#each draggableItems as draggableItem, idx (draggableItem.id)}
-						{@render dndRow(draggableItem, idx)}
-					{/each}
-				</div>
-			{/if}
-		{:else}
-			<div class="cells" class:view-mode={!canEdit} tabindex="-1">
-				{#each cellValues as _, idx (idx)}
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<!-- svelte-ignore event_directive_deprecated -->
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div
-						class="row"
-						tabindex={rowLocked ? -1 : 0}
-						class:focused={canEdit && focusedRowIndex === idx}
-						on:keydown={(e) => brain.handleKeyDown(e, idx)}
-						on:focusin={() => {
-							if (!rowLocked) focusedRowIndex = idx;
-						}}
-						on:focusout={brain.handleRowFocusOut}
-					>
-						{@render rowInput(idx, cellValues[idx])}
-						{@render rowActions(idx)}
-					</div>
-				{/each}
-			</div>
-		{/if}
-	{/key}
+	<div class="cells" class:view-mode={!canEdit} tabindex="-1">
+		{#each cellValues as rowValue, idx (rowIds[idx])}
+			{@render arrayRow(idx, rowValue, useDnD)}
+		{/each}
+	</div>
 </BaseCell>
 
 <style>
@@ -790,58 +765,37 @@
 		display: none;
 	}
 
-	/* svelte-dnd-action clones rows to document.body, outside .super-cell */
-	:global(#dnd-action-dragged-el) {
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
+	:global(.array-row-dragging) {
+		opacity: 0.95;
 		border-radius: 0.25rem;
 		border: 1px solid var(--spectrum-global-color-gray-300);
 		box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
-		background: var(--array-row-bg, var(--spectrum-global-color-gray-100));
-		opacity: 0.98;
-		outline: 2px solid var(--spectrum-global-color-gray-300);
-	}
-
-	:global(#dnd-action-dragged-el .row) {
-		display: flex;
-		align-items: stretch;
-		height: 2rem;
-		min-height: 2rem;
-		overflow: hidden;
-		border-bottom: none;
-		background: var(--array-row-bg, var(--spectrum-global-color-gray-100));
-	}
-
-	:global(#dnd-action-dragged-el .drag-handle) {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		align-self: stretch;
-		min-width: 26px;
-		height: 100%;
-		border-right: 1px solid var(--spectrum-global-color-gray-100);
-		color: var(--spectrum-global-color-blue-400);
 		background: var(--array-row-bg, var(--spectrum-global-color-gray-50));
-		font-weight: 600;
-	}
-
-	:global(#dnd-action-dragged-el input.editor) {
-		flex: 1 1 auto;
-		min-width: 0;
-		max-width: 100%;
-		height: 100%;
-		border: none;
-		outline: none;
-		background: var(--array-row-bg, var(--spectrum-global-color-gray-50));
-		color: var(--spectrum-global-color-gray-800);
-		font-size: 13px;
-		padding: 0 0.75rem;
 		cursor: grabbing;
 	}
 
-	:global(#dnd-action-dragged-el .action-buttons),
-	:global(#dnd-action-dragged-el .row-error-icon) {
+	:global(.array-row-dragging .row) {
+		border-bottom: none;
+	}
+
+	:global(.array-row-dragging input.editor) {
+		background: var(--array-row-bg, var(--spectrum-global-color-gray-50));
+		color: var(--spectrum-global-color-gray-800);
+		font-size: 13px;
+		cursor: grabbing;
+	}
+
+	:global(.array-row-dragging .action-buttons),
+	:global(.array-row-dragging .row-error-icon) {
 		display: none !important;
+	}
+
+	:global(.array-row-drag-over) {
+		outline: none;
+	}
+
+	.row-shell:global(.drop-before)::before,
+	.row-shell:global(.drop-after)::after {
+		background-color: var(--spectrum-global-color-blue-400);
 	}
 </style>
