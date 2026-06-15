@@ -102,7 +102,7 @@
 		<i class={actionIcon + ' copy-icon'} aria-hidden="true"></i>
 	{/if}
 
-	{#if buttons}
+	{#if buttons?.length}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="buttons" on:mousedown|preventDefault>
 			{#each buttons as button, index (index)}
