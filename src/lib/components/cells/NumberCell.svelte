@@ -18,7 +18,8 @@
 			initialState: 'view',
 			debounce: false
 		},
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	let timer = $state();
@@ -362,35 +363,38 @@
 	{copyIcon}
 	{color}
 	{background}
+	{buttons}
 >
-	{#if inEdit}
-		<input
-			bind:this={editor}
-			class="editor"
-			class:placeholder={!localValue}
-			style:text-align={align}
-			{tabindex}
-			value={editText}
-			{placeholder}
-			on:keydown={csm.keydown}
-			on:input={csm.handleInput}
-			on:wheel={(e) => csm.handleWheel(e)}
-		/>
-
-		{#if showStepper}
-			<NumberStepper
-				onIncrement={(e) => csm.increment(e)}
-				onDecrement={(e) => csm.decrement(e)}
+	{#key $csm}
+		{#if inEdit}
+			<input
+				bind:this={editor}
+				class="editor"
+				class:placeholder={!localValue}
+				style:text-align={align}
+				{tabindex}
+				value={editText}
+				{placeholder}
+				on:keydown={csm.keydown}
+				on:input={csm.handleInput}
+				on:wheel={(e) => csm.handleWheel(e)}
 			/>
+
+			{#if showStepper}
+				<NumberStepper
+					onIncrement={(e) => csm.increment(e)}
+					onDecrement={(e) => csm.decrement(e)}
+				/>
+			{/if}
+		{:else}
+			<span class="value" class:placeholder={isEmpty}>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="value-content" use:tooltip style:text-align={align} on:click={csm.click}>
+					{isEmpty ? placeholder : formattedValue}
+				</div>
+			</span>
 		{/if}
-	{:else}
-		<span class="value" class:placeholder={isEmpty}>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="value-content" use:tooltip style:text-align={align} on:click={csm.click}>
-				{isEmpty ? placeholder : formattedValue}
-			</div>
-		</span>
-	{/if}
+	{/key}
 </BaseCell>
 
 <style>
