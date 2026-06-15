@@ -8,7 +8,9 @@ const config = {
 			if (filename.split(/[/\\]/).includes('node_modules')) return undefined;
 			if (
 				filename.includes('InnerForm.svelte') ||
-				filename.includes('SuperForm.svelte')
+				filename.includes('SuperForm.svelte') ||
+				filename.includes('/SuperTable/') ||
+				filename.includes('/SuperTableColumn/')
 			) {
 				return false;
 			}

@@ -88,7 +88,7 @@
 	);
 	let pickerIdColumn = $derived($pickerFetch?.definition?.primary?.[0] ?? '_id');
 
-	let datasourceType = $derived(isUser ? 'user' : 'table');
+	let canFetchPicker = $derived(isUser || !!tableId);
 	let writable = $derived(!disabled && !readonly);
 
 	let optionsFetch = $state<ReturnType<typeof fetchData> | undefined>();
@@ -163,12 +163,26 @@
 		return localValue.map((item) => item.primaryDisplay).join(', ');
 	};
 
+	const getPickerDatasource = () => {
+		if (isUser) {
+			return { type: 'user' as const };
+		}
+		return { type: 'table' as const, tableId: tableId! };
+	};
+
+	const buildUserPickerQuery = (term: string) => {
+		if (!term || !showPopupSearch) {
+			return {};
+		}
+		return { fuzzy: { email: term } };
+	};
+
 	const loadMissingOptions = async (
 		items: LinkItem[],
 		linkedTableId?: string,
 		primaryDisplay?: string
 	) => {
-		if (!linkedTableId || !primaryDisplay || !writable) return;
+		if (!primaryDisplay || !writable) return;
 
 		const missingIds = items
 			.filter((item) => item.primaryDisplay === item._id || !item.primaryDisplay)
@@ -178,19 +192,37 @@
 
 		loadingMissing = true;
 		try {
-			const res = await API.searchTable(linkedTableId, {
-				query: {
-					oneOf: {
-						_id: missingIds
-					}
-				}
-			});
-
 			const enriched = new Map(localValue.map((item) => [item._id, item]));
 
-			for (const row of res.rows ?? []) {
-				const option = parseLinkItem(row, primaryDisplay);
-				if (option) enriched.set(option._id, option);
+			if (isUser) {
+				const res = await API.searchUsers({
+					query: {
+						oneOf: {
+							_id: missingIds
+						}
+					},
+					limit: missingIds.length
+				});
+
+				for (const row of res?.data ?? []) {
+					const option = parseLinkItem(row, primaryDisplay);
+					if (option) enriched.set(option._id, option);
+				}
+			} else {
+				if (!linkedTableId) return;
+
+				const res = await API.searchTable(linkedTableId, {
+					query: {
+						oneOf: {
+							_id: missingIds
+						}
+					}
+				});
+
+				for (const row of res.rows ?? []) {
+					const option = parseLinkItem(row, primaryDisplay);
+					if (option) enriched.set(option._id, option);
+				}
 			}
 
 			for (const id of missingIds) {
@@ -349,11 +381,15 @@
 	};
 
 	const buildPickerQuery = (term: string) => {
+		if (isUser) {
+			return buildUserPickerQuery(term);
+		}
+
 		if (!term || !showPopupSearch) {
 			return QueryUtils.buildQuery(filter);
 		}
 
-		const displayField = primaryDisplayField || (isUser ? 'email' : 'name');
+		const displayField = primaryDisplayField || 'name';
 
 		return QueryUtils.buildQuery([
 			...filter,
@@ -452,7 +488,7 @@
 	};
 
 	$effect(() => {
-		if ($csm !== 'editing' || !tableId || !writable) {
+		if ($csm !== 'editing' || !canFetchPicker || !writable) {
 			pickerFetch = undefined;
 			return;
 		}
@@ -463,12 +499,9 @@
 		untrack(() => {
 			pickerFetch = fetchData({
 				API,
-				datasource: {
-					type: datasourceType,
-					tableId
-				},
+				datasource: getPickerDatasource(),
 				options: {
-					query: buildPickerQuery(''),
+					...(isUser ? {} : { query: buildPickerQuery('') }),
 					limit: initLimit,
 					...(isRecursiveTable && config.sortColumn
 						? { sortColumn: config.sortColumn, sortOrder: config.sortOrder }
@@ -494,7 +527,8 @@
 			await enrichSelfReference(raw, linkedTableId, generation);
 			if (generation !== enrichGeneration) return;
 
-			const displayField = primaryDisplayField || fieldSchema?.primaryDisplay;
+			const displayField =
+				primaryDisplayField || fieldSchema?.primaryDisplay || (isUser ? 'email' : undefined);
 
 			if (displayField) {
 				await loadMissingOptions(localValue, linkedTableId, displayField);
@@ -503,18 +537,14 @@
 	});
 
 	$effect(() => {
-		if (!tableId || !writable) return;
+		if (!canFetchPicker || !writable) return;
 
 		untrack(() => {
-			const query = QueryUtils.buildQuery(filter);
 			optionsFetch = fetchData({
 				API,
-				datasource: {
-					type: datasourceType,
-					tableId
-				},
+				datasource: getPickerDatasource(),
 				options: {
-					query,
+					...(isUser ? {} : { query: QueryUtils.buildQuery(filter) }),
 					limit: 1
 				}
 			});

@@ -1,4 +1,5 @@
 export * from './components/cells/index.ts';
+export * from './components/charts/index.ts';
 export * from './components/form/index.ts';
 export { tooltip } from './actions/tooltip.ts';
 export { default as Button } from './components/Button.svelte';
@@ -12,13 +13,48 @@ export { default as Tooltip } from './components/UI/elements/Tooltip.svelte';
 export { default as SuperLightbox } from './components/SuperLightbox/SuperLightbox.svelte';
 export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
 export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';
+export { default as SuperTree } from './components/SuperTree/SuperTree.svelte';
+export { default as SuperTable } from './components/SuperTable/SuperTable.svelte';
+export { default as SuperTableColumn } from './components/SuperTableColumn/SuperTableColumn.svelte';
 export { default as DataProvider } from './components/DataProvider/DataProvider.svelte';
 export { extendQuery, sanitizeSchema } from './utils/dataProvider.ts';
+export {
+	mapRowsToCarbonData,
+	mapRowsToHeatmapData,
+	mapRowsToBubbleData,
+	mapRowsToTinyChartData,
+	type CarbonChartRow
+} from './utils/chartData.ts';
+export {
+	getToolbarOptions,
+	getZoomBarOptions,
+	getLegendOptions,
+	calculateTimeWindow,
+	spectrumChartPalette,
+	sequentialBluePalette,
+	divergingPalette
+} from './utils/chartOptions.ts';
 export {
 	fieldComponentMap,
 	specialFields,
 	getDefaultFieldComponent
 } from './utils/formFieldMap.ts';
+export {
+	sizingMap,
+	defaultOperatorMap,
+	supportFilteringMap,
+	supportSortingMap,
+	supportEditingMap
+} from './utils/tableConstants.ts';
+export {
+	cellComponents,
+	headerComponents,
+	getCellComponent,
+	getHeaderComponent,
+	buildRowCellOptions,
+	buildHeaderCellOptions
+} from './utils/cellComponentMap.ts';
+export { default as autoresizeTextarea } from './actions/autoresize_textarea.ts';
 export { beautifyLabel, createFormBrain } from './utils/formBrain.ts';
 export { deriveActiveFields, resolveFieldInnerType } from './utils/deriveActiveFields.ts';
 export {

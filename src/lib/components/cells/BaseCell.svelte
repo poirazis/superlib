@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Button from '../Button.svelte';
 	import SimpleButton from '../UI/elements/SimpleButton.svelte';
 	interface BaseCellProps {
 		role?: string;
