@@ -4,6 +4,8 @@
 
 	let {
 		size = 'M',
+		menuItem = false,
+		menuAlign = 'right',
 		icon = undefined,
 		iconAfterText = undefined,
 		iconColor = undefined,
@@ -148,6 +150,8 @@
 		if (working || workingState) return 'working';
 		return '';
 	});
+
+	let typeClass = $derived(menuItem ? '' : type);
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
@@ -160,7 +164,9 @@
 		confirmMode = false;
 	}}
 	tabindex={disabled ? -1 : 0}
-	class="super-button {type} {buttonState} {effectiveButtonClass}"
+	class="super-button {typeClass} {buttonState} {effectiveButtonClass}"
+	class:menu-item={menuItem}
+	class:menu-item-right={menuItem && menuAlign == 'right'}
 	class:xsmall={size == 'XS'}
 	class:small={size == 'S'}
 	class:large={size == 'L'}
@@ -253,6 +259,25 @@
 			display: none;
 			opacity: 0.9;
 		}
+	}
+
+	.menu-item {
+		width: 100%;
+		justify-content: flex-start;
+		border: unset !important;
+		border-radius: 0;
+		background-color: transparent !important;
+		font-weight: 500;
+
+		&:hover {
+			background-color: var(--spectrum-global-color-gray-200) !important;
+			color: var(--spectrum-global-color-gray-900);
+		}
+	}
+
+	.menu-item-right {
+		width: 100%;
+		justify-content: flex-end !important;
 	}
 
 	.full-width {
