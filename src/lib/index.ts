@@ -13,6 +13,19 @@ export { default as SuperPopover } from './components/SuperPopover/SuperPopover.
 export { default as DataProvider } from './components/DataProvider/DataProvider.svelte';
 export { extendQuery, sanitizeSchema } from './utils/dataProvider.ts';
 export {
+	fieldComponentMap,
+	specialFields,
+	getDefaultFieldComponent
+} from './utils/formFieldMap.ts';
+export { beautifyLabel, createFormBrain } from './utils/formBrain.ts';
+export { deriveActiveFields, resolveFieldInnerType } from './utils/deriveActiveFields.ts';
+export {
+	processFormValueForSave,
+	enrichFormTitle,
+	enrichFormFooter
+} from './utils/formCrud.ts';
+export { buildFormProButtons, type FormProButtonContext } from './utils/formProButtons.ts';
+export {
 	enrichButtonConditions,
 	getEnabledConditions,
 	getActiveConditions,

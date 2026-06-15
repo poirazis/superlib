@@ -341,7 +341,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding-right: 0.75rem;
+		padding-right: 0.5rem;
 		padding-left: 0.5rem;
 		color: var(--spectrum-global-color-gray-700);
 	}
