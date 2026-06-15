@@ -138,6 +138,10 @@
 		font-size: 13px;
 	}
 
+	.super-cell.isDirty {
+		border-left: 4px solid var(--spectrum-global-color-orange-400) !important;
+	}
+
 	.buttons {
 		display: flex;
 		align-items: center;
