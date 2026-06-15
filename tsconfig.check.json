@@ -11,6 +11,8 @@
 		"src/lib/components/cells/AttachmentExpandedCell.svelte",
 		"src/lib/components/cells/AttachmentSliderCell.svelte",
 		"src/lib/components/cells/attachmentUtils.ts",
-		"src/lib/components/cells/cellClipboard.ts"
+		"src/lib/components/cells/cellClipboard.ts",
+		"src/lib/utils/buttonConditions.ts",
+		"src/lib/utils/dataProvider.ts"
 	]
 }

@@ -1,8 +1,17 @@
+import type { ComponentCondition, EmptyFilterOption, SearchFilters } from '@budibase/types';
+
 type ProcessStringSync = (value: string, context: Record<string, unknown>) => unknown;
 
 type QueryUtilsType = {
-	buildQuery: (conditions: unknown[]) => { onEmptyFilter?: string };
-	runQuery: (conditions: unknown[], query: { onEmptyFilter?: string }) => unknown[];
+	buildQuery: (conditions: unknown[]) => SearchFilters;
+	runQuery: (conditions: unknown[], query: SearchFilters) => unknown[];
+};
+
+/** Shape passed to QueryUtils; must include enriched newValue on the doc row. */
+type ButtonLuceneCondition = Record<string, unknown> & {
+	type?: string;
+	field: string;
+	value: unknown;
 };
 
 type EnrichButtonActions = (
@@ -10,18 +19,8 @@ type EnrichButtonActions = (
 	context: Record<string, unknown>
 ) => (() => Promise<void>) | undefined;
 
-export type ButtonCondition = {
-	id?: string;
-	disabled?: boolean;
-	action?: 'show' | 'hide' | 'update';
-	setting?: string;
-	settingValue?: unknown;
-	referenceValue?: unknown;
-	newValue?: unknown;
-	valueType?: 'string' | 'number' | 'datetime' | 'boolean';
-	operator?: string;
-	type?: string;
-};
+/** Budibase component condition; kept partial for in-progress builder state. */
+export type ButtonCondition = Partial<ComponentCondition>;
 
 export type ConfiguredButton = Record<string, unknown> & {
 	conditions?: ButtonCondition[];
@@ -41,7 +40,7 @@ export type ResolveConfiguredButtonsOptions = {
 	forceDisabled?: boolean;
 };
 
-const EMPTY_FILTER_RETURN_NONE = 'none';
+const EMPTY_FILTER_RETURN_NONE = 'none' as EmptyFilterOption;
 
 const BINDING_PROPS = ['text', 'tooltip'] as const;
 
@@ -93,7 +92,9 @@ export const getActiveConditions = (
 			parsed.newValue = `${parsed.newValue}`.toLowerCase() === 'true';
 		}
 
-		const luceneCondition = {
+		// Spread parsed so newValue (the live binding value) is on the doc row
+		// that QueryUtils.runQuery evaluates against.
+		const luceneCondition: ButtonLuceneCondition = {
 			...parsed,
 			type: parsed.valueType,
 			field: 'newValue',

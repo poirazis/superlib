@@ -1,18 +1,17 @@
+import type { FieldSchema, FieldType, RowAttachment } from '@budibase/types';
+
 export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
 
-export type AttachmentItem = {
-	name?: string;
-	url?: string;
-	extension?: string;
-	[key: string]: unknown;
-};
+export type AttachmentItem = RowAttachment;
+
+const ATTACHMENT_SINGLE = 'attachment_single' as FieldType;
 
 export function isImage(attachment: AttachmentItem | null | undefined) {
 	return IMAGE_EXTENSIONS.includes(attachment?.extension?.toLowerCase() ?? '');
 }
 
-export function isMultiAttachment(fieldSchema: { type?: string } | null | undefined) {
-	return fieldSchema?.type?.includes('single') !== true;
+export function isMultiAttachment(fieldSchema: Pick<FieldSchema, 'type'> | null | undefined) {
+	return fieldSchema?.type !== ATTACHMENT_SINGLE;
 }
 
 export function normalizeAttachments(
