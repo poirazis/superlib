@@ -75,26 +75,32 @@ export function createFormBrain(options: FormBrainOptions) {
 		getPropsForField(field: Record<string, unknown>, _idx?: number | Record<string, unknown>) {
 			const reactive = getReactiveProps?.() ?? {};
 			const currentLabelPosition = (reactive.labelPosition as string) ?? labelPosition;
+			const resolvedLabelPosition =
+				currentLabelPosition === 'top' || currentLabelPosition === 'left'
+					? 'fieldGroup'
+					: currentLabelPosition;
 			const currentOptionsViewMode = (reactive.optionsViewMode as string) ?? optionsViewMode;
 			const currentRelViewMode = (reactive.relViewMode as string) ?? relViewMode;
 			const currentActionType = (reactive.actionType as string) ?? actionType;
 			const currentUseSpecialFields =
 				(reactive.useSpecialFields as boolean | undefined) ?? useSpecialFields;
 			const currentOwnId = (reactive.ownId as string | number | undefined) ?? ownId;
+			const currentDisabled = (reactive.disabled as boolean | undefined) ?? false;
 			const fieldName = (field.field || field.name) as string;
 
 			return {
 				...sanitizeFieldProps(field),
 				label: label(field.label as string | undefined),
-				labelPosition: currentLabelPosition,
+				labelPosition: resolvedLabelPosition,
 				placeholder:
 					currentActionType !== 'View' ? label(field.placeholder as string | undefined) : ' ',
 				useOptionColors: true,
 				optionsViewMode: currentOptionsViewMode,
 				relViewMode: currentRelViewMode,
+				disabled: currentDisabled,
 				readonly: field.readonly,
 				autocomplete: field.autocomplete,
-				role: 'formInput',
+				role: 'form',
 				showDirty: true,
 				direction: field.direction === 'vertical' ? 'column' : 'row',
 				invisible: currentUseSpecialFields && field.special,
