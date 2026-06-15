@@ -22,7 +22,8 @@
 		fieldSchema,
 		value,
 		multi: multiProp = false,
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	const dispatch = createEventDispatcher();
@@ -544,6 +545,7 @@
 	{icon}
 	isDirty={isDirty && showDirty}
 	popupOpen={open}
+	{buttons}
 >
 	{#key $csm}
 		{#if $csm !== 'editing' || !inputSelect}

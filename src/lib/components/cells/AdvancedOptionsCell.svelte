@@ -23,7 +23,8 @@
 		fieldSchema,
 		value,
 		multi: multiProp = false,
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	const dispatch = createEventDispatcher();
@@ -309,6 +310,7 @@
 	naked={controlType === 'buttons'}
 	multirow={cellMultirow}
 	isDirty={isDirty && showDirty}
+	{buttons}
 >
 	{#key controlType}
 		{#if isRadios}

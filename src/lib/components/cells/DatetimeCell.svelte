@@ -9,7 +9,7 @@
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
 
-	let { id, value, cellOptions = {}, autofocus = false } = $props();
+	let { id, value, cellOptions = {}, autofocus = false, buttons = [] } = $props();
 
 	let anchor = $state(null);
 	let popup = $state<HTMLElement | null>(null);
@@ -560,6 +560,7 @@
 	{background}
 	popupOpen={open}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
+	{buttons}
 >
 	{#if inputDate}
 		<input

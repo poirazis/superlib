@@ -17,7 +17,6 @@
 			initialState: 'view',
 			debounce: 250
 		},
-		autofocus = false,
 		buttons = []
 	} = $props();
 
@@ -56,7 +55,7 @@
 	// Derived values that do not depend on $csm
 	let error = $derived(optionError || errors.length > 0);
 
-	let isDirty = $derived(value !== localValue);
+	let isDirty = $derived(value != localValue);
 	let textarea = $derived(controlType === 'textarea');
 	let inEdit = $derived($csm === 'editing');
 	let isEmpty = $derived(!formattedValue && formattedValue !== 0);
@@ -68,15 +67,12 @@
 		'*': {
 			goTo(state) {
 				return state;
-			},
-			reset(newValue) {
-				if (newValue == localValue) return;
-				localValue = value;
-				errors = [];
-				return initialState;
 			}
 		},
 		view: {
+			_enter() {
+				localValue = value;
+			},
 			click() {
 				return this.focus();
 			},
@@ -155,20 +151,8 @@
 		}
 	});
 
-	$effect(() => {
-		const nextValue = value;
-		if (untrack(() => $csm) === 'editing') return;
-		localValue = nextValue;
-	});
-
 	// Lifecycle via effect (replaces onMount + onDestroy)
 	$effect(() => {
-		if (autofocus) {
-			setTimeout(() => {
-				csm.focus();
-			}, 50);
-		}
-
 		// cleanup
 		return () => {
 			if (timer) {
@@ -190,6 +174,9 @@
 
 		tabindex = readonly || disabled ? -1 : 0;
 	});
+
+	$inspect('localValue', localValue);
+	$inspect('value', value);
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->

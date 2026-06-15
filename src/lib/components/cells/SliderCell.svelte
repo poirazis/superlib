@@ -17,7 +17,8 @@
 			max: 100,
 			step: 1
 		},
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	let timer = $state();
@@ -274,6 +275,7 @@
 	{copyIcon}
 	{color}
 	{background}
+	{buttons}
 >
 	{#if icon}
 		<i class={icon + ' field-icon'} class:with-error={error}></i>

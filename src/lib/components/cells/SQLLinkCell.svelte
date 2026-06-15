@@ -26,7 +26,8 @@
 		limit = 100,
 		multi = false,
 		ownId: ownIdProp,
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
@@ -536,6 +537,7 @@
 	popupOpen={open}
 	{copyIcon}
 	{tabindex}
+	{buttons}
 >
 	{#key $csm}
 		<span class="value" class:placeholder={isEmpty}>

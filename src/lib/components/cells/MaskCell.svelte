@@ -23,7 +23,8 @@
 			debounce: false,
 			placeholder: ''
 		},
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	let timer = $state();
@@ -371,6 +372,7 @@
 	{copyIcon}
 	{color}
 	{background}
+	{buttons}
 >
 	{#key mask}
 		<input
