@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Button from '../Button.svelte';
 	interface BaseCellProps {
 		role?: string;
 		csm?: any; // state machine instance
@@ -39,6 +40,7 @@
 		background,
 		tabindex: tabindexOverride,
 		anchor = $bindable(null),
+		buttons = undefined,
 		children
 	}: BaseCellProps = $props();
 
@@ -98,6 +100,15 @@
 	{#if $csm === 'copyable' || $csm === 'justCopied'}
 		<i class={actionIcon + ' copy-icon'} aria-hidden="true"></i>
 	{/if}
+
+	{#if buttons}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="buttons" on:mousedown|preventDefault>
+			{#each buttons as button, index (index)}
+				<Button {...button} size={'XS'} buttonClass={'actionButton'} type="secondary" />
+			{/each}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -119,6 +130,14 @@
 		transition: border-color 0.15s ease;
 		color: var(--spectrum-global-color-gray-800);
 		font-size: 13px;
+	}
+
+	.buttons {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0 0.25rem;
+		border-left: 1px solid var(--spectrum-global-color-gray-300);
 	}
 
 	.super-cell.view:focus,

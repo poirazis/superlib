@@ -4,6 +4,7 @@
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
 	import { tooltip } from '../../actions/tooltip';
+	import Button from '../Button.svelte';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -16,7 +17,8 @@
 			initialState: 'view',
 			debounce: 250
 		},
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	// Local state (runes)
@@ -210,6 +212,7 @@
 	{copyIcon}
 	{color}
 	{background}
+	{buttons}
 >
 	{#key $csm}
 		{#if inEdit}
