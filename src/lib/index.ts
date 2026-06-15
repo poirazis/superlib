@@ -12,3 +12,16 @@ export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
 export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';
 export { default as DataProvider } from './components/DataProvider/DataProvider.svelte';
 export { extendQuery, sanitizeSchema } from './utils/dataProvider.ts';
+export {
+	enrichButtonConditions,
+	getActiveConditions,
+	reduceConditionActions,
+	evaluateButtonConditions,
+	resolveConfiguredButtons
+} from './utils/buttonConditions.ts';
+export type {
+	ButtonCondition,
+	ConfiguredButton,
+	ButtonConditionsSdk,
+	ResolveConfiguredButtonsOptions
+} from './utils/buttonConditions.ts';
