@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { createEventDispatcher, getContext, untrack } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './cellClipboard';
@@ -23,7 +23,7 @@
 
 	// Local state (runes)
 	let timer = $state();
-	let localValue = $derived(value);
+	let localValue = $state();
 	let errors = $state([]);
 	let editor = $state();
 
@@ -77,9 +77,6 @@
 			}
 		},
 		view: {
-			_enter() {
-				localValue = value;
-			},
 			click() {
 				return this.focus();
 			},
@@ -89,11 +86,7 @@
 				}
 			}
 		},
-		readonly: {
-			_enter() {
-				localValue = value;
-			}
-		},
+		readonly: {},
 		copyable: {
 			click() {
 				copyAndTransition(() => csm, String(value ?? ''));
@@ -106,11 +99,7 @@
 			}
 		},
 		justCopied: deferJustCopied(() => csm),
-		disabled: {
-			_enter() {
-				localValue = value;
-			}
-		},
+		disabled: {},
 		editing: {
 			_enter() {
 				dispatch('enteredit');
@@ -164,6 +153,12 @@
 				}
 			}
 		}
+	});
+
+	$effect(() => {
+		const nextValue = value;
+		if (untrack(() => $csm) === 'editing') return;
+		localValue = nextValue;
 	});
 
 	// Lifecycle via effect (replaces onMount + onDestroy)
