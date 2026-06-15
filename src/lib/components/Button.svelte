@@ -28,6 +28,7 @@
 		// Events
 		onTimer = undefined,
 		onLoopStart = undefined,
+		onLoopEvent = undefined,
 		onLoopEnd = undefined,
 		onTrueCondition = undefined,
 		onFalseCondition = undefined,
@@ -95,15 +96,17 @@
 			return;
 		}
 
+		console.log(actionsMode, onClick, onLoopEvent);
+
 		// Reset confirm mode after executing action
 		confirmMode = false;
 		working = true;
 		if (actionsMode == 'loop') {
 			if (onLoopStart) await onLoopStart({ iterations: loopSource?.length });
-			if (Array.isArray(loop) && loopEvent) {
+			if (Array.isArray(loop) && onLoopEvent) {
 				for (var i = 0; i < loop.length; i++) {
 					buttonText = `Processing ${i + 1}/${loop.length}`;
-					await loopEvent({ idx: i, value: loop[i] });
+					await onLoopEvent({ idx: i, value: loop[i] });
 					await sleep(loopDelay);
 				}
 				buttonText = 'Done';

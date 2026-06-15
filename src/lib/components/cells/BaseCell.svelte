@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Button from '../Button.svelte';
+	import SimpleButton from '../UI/elements/SimpleButton.svelte';
 	interface BaseCellProps {
 		role?: string;
 		csm?: any; // state machine instance
@@ -105,7 +106,12 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="buttons" on:mousedown|preventDefault>
 			{#each buttons as button, index (index)}
-				<Button {...button} size={'XS'} buttonClass={'actionButton'} type="secondary" />
+				<SimpleButton
+					fieldbutton={true}
+					label={button.text}
+					on:select={button.onClick}
+					{...button}
+				/>
 			{/each}
 		</div>
 	{/if}
@@ -137,7 +143,6 @@
 		align-items: center;
 		gap: 0.25rem;
 		padding: 0 0.25rem;
-		border-left: 1px solid var(--spectrum-global-color-gray-300);
 	}
 
 	.super-cell.view:focus,

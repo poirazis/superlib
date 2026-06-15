@@ -10,7 +10,8 @@
 		iconOnly = false,
 		color = undefined,
 		icon = undefined,
-		label = ''
+		label = '',
+		fieldbutton = false
 	} = $props();
 
 	function handleSelect() {
@@ -28,13 +29,14 @@
 	class:disabled
 	class:icon-only={iconOnly}
 	class:view-mode={viewMode}
+	class:field-button={fieldbutton}
 	style:--option-color={color}
 	on:click={handleSelect}
 >
 	{#if icon}
 		<i class={icon}></i>
 	{/if}
-	{#if label}
+	{#if !iconOnly && label}
 		<span class="label">{label}</span>
 	{/if}
 </div>
@@ -61,6 +63,13 @@
 		gap: 0.35rem;
 		max-height: 1.75rem;
 		min-width: 0;
+		font-size: 12px;
+	}
+
+	.simple-button.field-button {
+		border: 1px solid var(--spectrum-global-color-gray-200);
+		padding: 0.25rem 0.5rem;
+		border-radius: 0.25rem;
 	}
 
 	.simple-button.view-mode,
@@ -94,16 +103,7 @@
 		aspect-ratio: 1;
 		border-radius: 0.25rem;
 		padding: 0.25rem;
-		height: 1.5rem;
-		width: 1.5rem;
-		min-width: 1.5rem;
-		max-height: 1.5rem;
 		flex: none;
-	}
-
-	.simple-button > i {
-		font-size: 13px;
-		flex-shrink: 0;
 	}
 
 	.label {

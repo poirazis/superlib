@@ -172,8 +172,19 @@ const resolveConfiguredButton = (
 		return null;
 	}
 
-	const { conditions: _conditions, _conditions: __conditions, disabledTemplate, onClick, icon, ...rest } =
-		button;
+	const {
+		conditions: _conditions,
+		_conditions: __conditions,
+		disabledTemplate,
+		onClick,
+		onLoopStart,
+		onLoopEvent,
+		onLoopEnd,
+		onTrueCondition,
+		onFalseCondition,
+		icon,
+		...rest
+	} = button;
 
 	const resolved: Record<string, unknown> = {
 		...rest,
@@ -191,8 +202,14 @@ const resolveConfiguredButton = (
 	}
 
 	const templateDisabled = processStringSync(disabledTemplate ?? '', context) === true;
-	resolved.disabled = Boolean(resolved.disabled) || templateDisabled || Boolean(options.forceDisabled);
+	resolved.disabled =
+		Boolean(resolved.disabled) || templateDisabled || Boolean(options.forceDisabled);
 	resolved.onClick = enrichButtonActions(onClick, context);
+	resolved.onLoopStart = enrichButtonActions(onLoopStart, context);
+	resolved.onLoopEvent = enrichButtonActions(onLoopEvent, context);
+	resolved.onLoopEnd = enrichButtonActions(onLoopEnd, context);
+	resolved.onTrueCondition = enrichButtonActions(onTrueCondition, context);
+	resolved.onFalseCondition = enrichButtonActions(onFalseCondition, context);
 
 	return resolved;
 };
