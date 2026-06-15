@@ -14,6 +14,7 @@ export { default as DataProvider } from './components/DataProvider/DataProvider.
 export { extendQuery, sanitizeSchema } from './utils/dataProvider.ts';
 export {
 	enrichButtonConditions,
+	getEnabledConditions,
 	getActiveConditions,
 	reduceConditionActions,
 	evaluateButtonConditions,

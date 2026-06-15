@@ -12,6 +12,7 @@ type EnrichButtonActions = (
 
 export type ButtonCondition = {
 	id?: string;
+	disabled?: boolean;
 	action?: 'show' | 'hide' | 'update';
 	setting?: string;
 	settingValue?: unknown;
@@ -44,6 +45,12 @@ const EMPTY_FILTER_RETURN_NONE = 'none';
 
 const BINDING_PROPS = ['text', 'tooltip'] as const;
 
+export const getEnabledConditions = (
+	conditions: ButtonCondition[] | undefined
+): ButtonCondition[] => {
+	return conditions?.filter((condition) => !condition.disabled) ?? [];
+};
+
 export const enrichButtonConditions = (
 	conditions: ButtonCondition[] | undefined,
 	context: Record<string, unknown>,
@@ -65,6 +72,10 @@ export const getActiveConditions = (
 	}
 
 	return conditions.filter((condition) => {
+		if (condition.disabled) {
+			return false;
+		}
+
 		const parsed = { ...condition };
 
 		if (parsed.valueType === 'number') {
@@ -121,8 +132,10 @@ export const evaluateButtonConditions = (
 		return { visible: true, settingUpdates: {} as Record<string, unknown> };
 	}
 
-	let visible = !conditions.find((condition) => condition.action === 'show');
-	const activeConditions = getActiveConditions(conditions, QueryUtils);
+	const enabledConditions = getEnabledConditions(conditions);
+
+	let visible = !enabledConditions.find((condition) => condition.action === 'show');
+	const activeConditions = getActiveConditions(enabledConditions, QueryUtils);
 	const result = reduceConditionActions(activeConditions);
 
 	if (result.visible != null) {
