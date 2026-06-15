@@ -1,6 +1,6 @@
 {
 	"name": "@poirazis/superlib",
-	"version": "0.0.14",
+	"version": "0.0.15",
 	"packageManager": "bun@1.3.14",
 	"scripts": {
 		"dev": "vite dev",

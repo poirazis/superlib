@@ -7,7 +7,10 @@
 		copyable = false,
 		copyIcon = 'always',
 		copyLabel = 'Copy to clipboard',
+		copiedLabel = 'Copied !',
+		wrap = false,
 		justCopied = $bindable(false),
+		monospace = false,
 		oncopy
 	} = $props();
 
@@ -64,9 +67,11 @@
 	class:copied={justCopied}
 	class:disabled
 	class:icon-on-hover={copyIcon === 'onhover' && align !== 'right'}
+	class:wrap
+	class:monospace
 	role="button"
 	tabindex={disabled ? -1 : 0}
-	title={copyable ? copyLabel : undefined}
+	title={copyable ? (justCopied ? copiedLabel : copyLabel) : undefined}
 	on:click={copyToClipboard}
 	on:keydown={handleKeydown}
 >
@@ -74,7 +79,7 @@
 		<i class={effectiveIcon + ' textbox-icon'} aria-hidden="true"></i>
 	{/if}
 
-	<span class="textbox-text" style="text-align: {align}">
+	<span class="textbox-text" class:wrap style="text-align: {align}">
 		{stringValue}
 	</span>
 
@@ -101,6 +106,10 @@
 	.textbox-icon {
 		margin-left: -0.25rem;
 		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.textbox.value.monospace {
+		font-family: var(--spectrum-global-font-family-monospace);
 	}
 
 	.textbox.value.copyable {
@@ -146,5 +155,12 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.textbox-text.wrap {
+		white-space: normal;
+		overflow: visible;
+		text-overflow: unset;
+		word-break: break-word;
 	}
 </style>

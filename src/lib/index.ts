@@ -7,6 +7,8 @@ export { default as Switch } from './components/UI/elements/Switch.svelte';
 export { default as Checkbox } from './components/UI/elements/Checkbox.svelte';
 export { default as Radiobox } from './components/UI/elements/Radiobox.svelte';
 export { default as SimpleButton } from './components/UI/elements/SimpleButton.svelte';
+export { default as Textbox } from './components/UI/elements/Textbox.svelte';
+export { default as Tooltip } from './components/UI/elements/Tooltip.svelte';
 export { default as SuperLightbox } from './components/SuperLightbox/SuperLightbox.svelte';
 export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
 export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';
