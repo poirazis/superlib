@@ -110,7 +110,7 @@
 	let inEdit = $derived($csm === 'editing');
 	let displayValue = $derived(inEdit ? localValue : applyMask(value));
 	let clearable = $derived(
-		config.clearIcon !== false &&
+		config.clearValue === true &&
 			config.role !== 'inline' &&
 			inEdit &&
 			localValue != null &&

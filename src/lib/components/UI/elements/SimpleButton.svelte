@@ -7,6 +7,7 @@
 		selected = false,
 		disabled = false,
 		viewMode = false,
+		iconOnly = false,
 		color = undefined,
 		icon = undefined,
 		label = ''
@@ -25,6 +26,7 @@
 	class="simple-button"
 	class:selected
 	class:disabled
+	class:icon-only={iconOnly}
 	class:view-mode={viewMode}
 	style:--option-color={color}
 	on:click={handleSelect}
@@ -32,7 +34,9 @@
 	{#if icon}
 		<i class={icon}></i>
 	{/if}
-	<span class="label">{label}</span>
+	{#if label}
+		<span class="label">{label}</span>
+	{/if}
 </div>
 
 <style>
@@ -84,6 +88,17 @@
 		border-color: var(--spectrum-global-color-gray-400);
 		color: var(--spectrum-global-color-gray-800);
 		font-weight: 600;
+	}
+
+	.simple-button.icon-only {
+		aspect-ratio: 1;
+		border-radius: 0.25rem;
+		padding: 0.25rem;
+		height: 1.5rem;
+		width: 1.5rem;
+		min-width: 1.5rem;
+		max-height: 1.5rem;
+		flex: none;
 	}
 
 	.simple-button > i {

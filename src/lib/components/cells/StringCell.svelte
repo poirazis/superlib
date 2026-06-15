@@ -36,7 +36,9 @@
 	});
 
 	let controlType = $derived(config.controlType);
-	let clearable = $derived(config.role !== 'inline' && $csm === 'editing' && localValue);
+	let clearable = $derived(
+		config.clearValue === true && config.role !== 'inline' && $csm === 'editing' && localValue
+	);
 
 	let readonly = $derived(config.readonly);
 	let optionError = $derived(config.error);

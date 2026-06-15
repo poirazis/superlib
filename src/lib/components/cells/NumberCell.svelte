@@ -49,7 +49,7 @@
 	let stepValue = $derived(config.stepSize ?? config.step ?? 1);
 	let min = $derived(config.min);
 	let max = $derived(config.max);
-	let clearValueEnabled = $derived(config.clearValue !== false && config.role !== 'inline');
+	let clearValueEnabled = $derived(config.clearValue === true && config.role !== 'inline');
 
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);

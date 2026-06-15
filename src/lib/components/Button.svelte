@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { tooltip as showTooltip } from '../actions/tooltip';
 
 	let {
 		size = 'M',
@@ -33,10 +34,10 @@
 		workingState = undefined
 	} = $props();
 
-	let buttonElement: HTMLButtonElement;
 	let confirmMode = $state(false);
 	let working = $state(false);
-	let tooltipShow = $state(false);
+
+	let tooltipOptions = $derived(tooltip ? { text: tooltip, whenTruncated: false } : undefined);
 	let ui_timer: ReturnType<typeof setInterval>;
 	let elapsed = 0;
 	let buttonText = $derived(
@@ -97,7 +98,6 @@
 		// Reset confirm mode after executing action
 		confirmMode = false;
 		working = true;
-		tooltipShow = false;
 		if (actionsMode == 'loop') {
 			if (onLoopStart) await onLoopStart({ iterations: loopSource?.length });
 			if (Array.isArray(loop) && loopEvent) {
@@ -118,18 +118,6 @@
 			await onClick?.(e);
 		}
 		working = false;
-	}
-
-	function showTooltip() {
-		if (tooltip) {
-			// Show tooltip logic here
-		}
-	}
-
-	function hideTooltip() {
-		if (tooltip) {
-			// Hide tooltip logic here
-		}
 	}
 
 	const safeParse = (input: string | undefined) => {
@@ -161,12 +149,10 @@
 
 <!-- svelte-ignore event_directive_deprecated -->
 <button
-	bind:this={buttonElement}
+	use:showTooltip={tooltipOptions}
 	on:click={(e) => {
 		handleClick(e);
 	}}
-	on:mouseenter={showTooltip}
-	on:mouseleave={hideTooltip}
 	on:blur={() => {
 		confirmMode = false;
 	}}

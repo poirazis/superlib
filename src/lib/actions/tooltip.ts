@@ -1,12 +1,75 @@
 /**
  * Tooltip action - shows a styled tooltip on hover when element text is truncated
  * Usage: use:tooltip={'Full text here'}
+ * Usage: use:tooltip={{ text: 'Help', position: 'below-start' }}
  */
 
-interface TooltipOptions {
+export type TooltipPosition =
+	| 'above-center'
+	| 'above-start'
+	| 'above-end'
+	| 'below-center'
+	| 'below-start'
+	| 'below-end';
+
+export interface TooltipOptions {
 	text?: string;
 	delay?: number;
 	whenTruncated?: boolean;
+	enabled?: boolean;
+	position?: TooltipPosition;
+}
+
+type TooltipParam = string | TooltipOptions | null | undefined;
+
+interface TooltipConfig {
+	active: boolean;
+	text: string;
+	delay: number;
+	whenTruncated: boolean;
+	position: TooltipPosition;
+}
+
+const TOOLTIP_GAP = 4;
+
+function parseOptions(options: TooltipParam): TooltipConfig {
+	if (options == null) {
+		return {
+			active: false,
+			text: '',
+			delay: 500,
+			whenTruncated: true,
+			position: 'above-center'
+		};
+	}
+
+	if (typeof options === 'string') {
+		return {
+			active: options.length > 0,
+			text: options,
+			delay: 500,
+			whenTruncated: false,
+			position: 'above-center'
+		};
+	}
+
+	if (options.enabled === false) {
+		return {
+			active: false,
+			text: '',
+			delay: 500,
+			whenTruncated: true,
+			position: 'above-center'
+		};
+	}
+
+	return {
+		active: true,
+		text: options.text ?? '',
+		delay: options.delay ?? 500,
+		whenTruncated: options.whenTruncated ?? true,
+		position: options.position ?? 'above-center'
+	};
 }
 
 let activeTooltip: HTMLElement | null = null;
@@ -48,14 +111,41 @@ function createTooltipElement() {
 	tooltip.className = 'tooltip-popup';
 	tooltip.setAttribute('role', 'tooltip');
 
-	// Mount to app-root or fallback to body
 	const appRoot = document.getElementById('app-root') || document.body;
 	appRoot.appendChild(tooltip);
 	return tooltip;
 }
 
-function showTooltip(element: HTMLElement, text: string, delay = 500, whenTruncated = true) {
-	// Check if truncated (unless whenTruncated is false)
+function positionTooltip(tooltip: HTMLElement, anchor: DOMRect, position: TooltipPosition) {
+	const tooltipRect = tooltip.getBoundingClientRect();
+	const [vertical, horizontal] = position.split('-') as ['above' | 'below', 'center' | 'start' | 'end'];
+
+	let top =
+		vertical === 'above'
+			? anchor.top - tooltipRect.height - TOOLTIP_GAP
+			: anchor.bottom + TOOLTIP_GAP;
+
+	let left = anchor.left;
+	if (horizontal === 'center') {
+		left = anchor.left + (anchor.width - tooltipRect.width) / 2;
+	} else if (horizontal === 'end') {
+		left = anchor.right - tooltipRect.width;
+	}
+
+	const maxLeft = window.innerWidth - tooltipRect.width - TOOLTIP_GAP;
+	const maxTop = window.innerHeight - tooltipRect.height - TOOLTIP_GAP;
+
+	tooltip.style.top = `${Math.max(TOOLTIP_GAP, Math.min(top, maxTop))}px`;
+	tooltip.style.left = `${Math.max(TOOLTIP_GAP, Math.min(left, maxLeft))}px`;
+}
+
+function showTooltip(
+	element: HTMLElement,
+	text: string,
+	delay = 500,
+	whenTruncated = true,
+	position: TooltipPosition = 'above-center'
+) {
 	if (whenTruncated && element.scrollWidth <= element.offsetWidth) {
 		return;
 	}
@@ -63,22 +153,15 @@ function showTooltip(element: HTMLElement, text: string, delay = 500, whenTrunca
 	if (tooltipTimer) clearTimeout(tooltipTimer);
 
 	tooltipTimer = setTimeout(() => {
-		// Remove previous tooltip
 		if (activeTooltip) {
 			activeTooltip.remove();
 		}
 
-		// Create and position new tooltip
 		const tooltip = createTooltipElement();
 		tooltip.textContent = text;
 
-		// Position relative to viewport
 		const rect = element.getBoundingClientRect();
-		const top = window.scrollY + rect.bottom + 4;
-		const left = window.scrollX + rect.left;
-
-		tooltip.style.top = `${top}px`;
-		tooltip.style.left = `${left}px`;
+		positionTooltip(tooltip, rect, position);
 
 		activeTooltip = tooltip;
 	}, delay);
@@ -96,41 +179,50 @@ function hideTooltip() {
 	}
 }
 
-export function tooltip(element: HTMLElement, options?: string | TooltipOptions) {
+export function tooltip(element: HTMLElement, options?: TooltipParam) {
 	injectStyles();
 
-	let text = '';
-	let delay = 500;
-	let whenTruncated = true;
+	let config = parseOptions(options);
+	let handleMouseenter: (() => void) | undefined;
 
-	if (typeof options === 'string') {
-		text = options;
-	} else if (options) {
-		text = options.text ?? '';
-		delay = options.delay ?? 500;
-		whenTruncated = options.whenTruncated ?? true;
-	}
-
-	const handleMouseenter = () => {
-		// Use provided text or fallback to element's text content
-		const tooltipText = text || element.textContent || '';
-
-		if (!tooltipText) {
-			return; // Don't show tooltip if no text available
+	const detach = () => {
+		if (handleMouseenter) {
+			element.removeEventListener('mouseenter', handleMouseenter);
+			handleMouseenter = undefined;
 		}
-
-		showTooltip(element, tooltipText, delay, whenTruncated);
+		element.removeEventListener('mouseleave', hideTooltip);
+		hideTooltip();
 	};
-	const handleMouseleave = hideTooltip;
 
-	element.addEventListener('mouseenter', handleMouseenter);
-	element.addEventListener('mouseleave', handleMouseleave);
+	const attach = () => {
+		detach();
+		if (!config.active) return;
+
+		handleMouseenter = () => {
+			const tooltipText = config.text || element.textContent || '';
+			if (!tooltipText) return;
+			showTooltip(
+				element,
+				tooltipText,
+				config.delay,
+				config.whenTruncated,
+				config.position
+			);
+		};
+
+		element.addEventListener('mouseenter', handleMouseenter);
+		element.addEventListener('mouseleave', hideTooltip);
+	};
+
+	attach();
 
 	return {
+		update(newOptions: TooltipParam) {
+			config = parseOptions(newOptions);
+			attach();
+		},
 		destroy() {
-			element.removeEventListener('mouseenter', handleMouseenter);
-			element.removeEventListener('mouseleave', handleMouseleave);
-			hideTooltip();
+			detach();
 		}
 	};
 }

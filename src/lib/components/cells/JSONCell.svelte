@@ -112,7 +112,11 @@
 	let isEmpty = $derived(!formattedValue && formattedValue !== '0');
 	let isDirty = $derived(inEdit && localValue !== originalValue);
 	let clearable = $derived(
-		config.role !== 'inline' && inEdit && localValue != null && localValue !== ''
+		config.clearValue === true &&
+			config.role !== 'inline' &&
+			inEdit &&
+			localValue != null &&
+			localValue !== ''
 	);
 
 	const emitChange = (nextValue: string | null) => {

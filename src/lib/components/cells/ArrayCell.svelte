@@ -101,6 +101,7 @@
 	let icon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
+	let cellBackground = $derived(disabled || readonly ? undefined : background);
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
@@ -155,7 +156,10 @@
 		draggedEl.querySelector('.editor').style.backgroundColor = 'transparent';
 		draggedEl.querySelector('.editor').style.border = 'none';
 		draggedEl.querySelector('.editor').style.color = 'var(--spectrum-global-color-gray-900)';
-		draggedEl.querySelector('.action-buttons').style.display = 'none';
+		let actionButtons = draggedEl.querySelector('.action-buttons');
+		if (actionButtons) {
+			actionButtons.style.display = 'none';
+		}
 	}
 
 	const dndZoneOptions = $derived({
@@ -211,7 +215,6 @@
 
 	const commitValue = () => {
 		dispatch('change', [...outputValue]);
-		dispatch('labelChange', outputValue.join(', ') || null);
 	};
 
 	const clearAllRowErrors = () => {
@@ -536,6 +539,7 @@
 		value={rowValue}
 		{placeholder}
 		style:text-align={align}
+		style:background={rowLocked ? 'transparent' : undefined}
 		readonly={rowLocked}
 		{disabled}
 		tabindex={rowLocked ? -1 : 0}
@@ -557,17 +561,20 @@
 		<div class="action-buttons" on:mousedown|stopPropagation>
 			{#if reorder === 'full'}
 				<SimpleButton
+					iconOnly
 					icon="ph ph-caret-up"
 					disabled={idx === 0}
 					on:select={() => brain.moveItem(idx, idx - 1)}
 				/>
 				<SimpleButton
+					iconOnly
 					icon="ph ph-caret-down"
 					disabled={idx === cellValues.length - 1}
 					on:select={() => brain.moveItem(idx, idx + 1)}
 				/>
 			{/if}
 			<SimpleButton
+				iconOnly
 				icon={idx < cellValues.length - 1 ? 'ph ph-trash-simple' : 'ph ph-plus'}
 				disabled={(parsedMax > 0 &&
 					idx === cellValues.length - 1 &&
@@ -625,7 +632,7 @@
 	{role}
 	{icon}
 	{color}
-	{background}
+	background={cellBackground}
 	{copyIcon}
 	{tabindex}
 	multirow={true}
@@ -721,7 +728,7 @@
 		flex-shrink: 0;
 	}
 
-	.row :global(input.editor.row-error) {
+	input.editor.row-error {
 		color: var(--spectrum-global-color-red-700);
 	}
 
@@ -773,20 +780,5 @@
 		align-self: stretch;
 		align-items: center;
 		padding: 0.15rem 0.25rem;
-	}
-
-	.action-buttons :global(.simple-button) {
-		aspect-ratio: 1;
-		border-radius: 0.25rem;
-		padding: 0.25rem;
-		height: 1.5rem;
-		width: 1.5rem;
-		min-width: 1.5rem;
-		max-height: 1.5rem;
-		flex: none;
-	}
-
-	.action-buttons :global(.simple-button .label:empty) {
-		display: none;
 	}
 </style>
