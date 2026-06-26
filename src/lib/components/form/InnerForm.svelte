@@ -468,6 +468,15 @@
 
 	setContext('form-step', writable(1));
 
+	// svelte-ignore state_referenced_locally
+	let fieldGroupLabelPosition = $state(labelPosition);
+	// svelte-ignore state_referenced_locally
+	setContext('field-group', fieldGroupLabelPosition);
+
+	$effect(() => {
+		fieldGroupLabelPosition = labelPosition;
+	});
+
 	$effect(() => {
 		return currentStep.subscribe((step) => {
 			if (currentStepValue !== step) {
@@ -589,11 +598,6 @@
 	let scope = $derived(
 		provideContextScope === 'local' ? ContextScopes.Local : ContextScopes.Global
 	);
-
-	$effect(() => {
-		labelPosition;
-		untrack(() => setContext('field-group', labelPosition));
-	});
 
 	const normalizedColumns = $derived(Math.max(1, Number(columns) || 1));
 	const fieldGroupColumnsStore = writable(untrack(() => Math.max(1, Number(columns) || 1)));
