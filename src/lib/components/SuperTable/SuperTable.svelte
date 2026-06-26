@@ -604,8 +604,7 @@
 			if (stbSelected.size) tableAPI.executeRowOnSelectAction(index);
 		},
 		selectAllRows: () => {
-			if (stbSelected.size != cachedRows.length)
-				stbSelected = new Set(cachedRows.keys());
+			if (stbSelected.size != cachedRows.length) stbSelected = new Set(cachedRows.keys());
 			else stbSelected = new Set();
 		},
 		clearSelection: () => {
@@ -704,7 +703,9 @@
 			if (result === false) {
 				tableAPI.restoreRowAt(index);
 			} else {
-				stbSelected = new Set([...stbSelected].filter(i => i !== index).map(i => i > index ? i - 1 : i));
+				stbSelected = new Set(
+					[...stbSelected].filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))
+				);
 				tableAPI.removeRowAt(index);
 			}
 
@@ -712,9 +713,9 @@
 		},
 		deleteSelectedRows: async () => {
 			const indicesToDelete = [...stbSelected];
-			const rowsToDelete = indicesToDelete.map(i => cachedRows[i]).filter(Boolean);
+			const rowsToDelete = indicesToDelete.map((i) => cachedRows[i]).filter(Boolean);
 			const idsToDelete = rowsToDelete.map((row) => row._id);
-			const disabledIndices = indicesToDelete.filter(i => cachedRows[i]);
+			const disabledIndices = indicesToDelete.filter((i) => cachedRows[i]);
 
 			rowsToDelete.forEach((row) => {
 				const rowIndex = cachedRows.indexOf(row);
@@ -809,7 +810,12 @@
 			if (!cachedRows[index]?.__meta?.disabled) return;
 			const priorMeta = { ...cachedRows[index].__meta };
 			delete priorMeta.disabled;
-			cachedRows[index] = tableAPI.enrichSingleRow(cachedRows[index], index, priorMeta, columns ?? superColumns);
+			cachedRows[index] = tableAPI.enrichSingleRow(
+				cachedRows[index],
+				index,
+				priorMeta,
+				columns ?? superColumns
+			);
 		},
 		removeRowsByIds: (ids) => {
 			const idSet = new Set(ids.map((id) => id?.toString()).filter(Boolean));
@@ -938,13 +944,7 @@
 			init() {
 				return 'Init';
 			},
-			enrichRows(
-				rows,
-				rowBGColorTemplate,
-				rowColorTemplate,
-				rowDisabledTemplate,
-				columns
-			) {
+			enrichRows(rows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, columns) {
 				if (!rows?.length) {
 					if (cachedRows.length) cachedRows = [];
 					return;
@@ -1170,7 +1170,11 @@
 					cachedRows = [...fetchState.rows];
 					stbSchema = fetchState.definition?.schema || {};
 					this.enrichRows(
-						cachedRows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, superColumns
+						cachedRows,
+						rowBGColorTemplate,
+						rowColorTemplate,
+						rowDisabledTemplate,
+						superColumns
 					);
 					return 'Idle';
 				}
@@ -1195,7 +1199,11 @@
 					isEmpty = fetchState.rows.length < 1;
 					cachedRows = [...fetchState.rows];
 					this.enrichRows(
-						cachedRows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, superColumns
+						cachedRows,
+						rowBGColorTemplate,
+						rowColorTemplate,
+						rowDisabledTemplate,
+						superColumns
 					);
 					this.calculateRowBoundaries();
 				}
@@ -1226,7 +1234,11 @@
 				if (fetchState.loaded) {
 					cachedRows = [...fetchState.rows];
 					this.enrichRows(
-						cachedRows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, superColumns
+						cachedRows,
+						rowBGColorTemplate,
+						rowColorTemplate,
+						rowDisabledTemplate,
+						superColumns
 					);
 					return resolveLoadedState();
 				}
@@ -1240,7 +1252,11 @@
 					isEmpty = fetchState.rows.length < 1;
 					cachedRows = [...cachedRows, ...fetchState.rows];
 					this.enrichRows(
-						cachedRows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, superColumns
+						cachedRows,
+						rowBGColorTemplate,
+						rowColorTemplate,
+						rowDisabledTemplate,
+						superColumns
 					);
 					return resolveLoadedState();
 				}
@@ -1282,7 +1298,11 @@
 					isEmpty = fetchState.rows.length < 1;
 					cachedRows = [...fetchState.rows];
 					this.enrichRows(
-						cachedRows, rowBGColorTemplate, rowColorTemplate, rowDisabledTemplate, superColumns
+						cachedRows,
+						rowBGColorTemplate,
+						rowColorTemplate,
+						rowDisabledTemplate,
+						superColumns
 					);
 					this.calculateRowBoundaries();
 				}
@@ -1426,12 +1446,10 @@
 	let defaultQuery = $derived(QueryUtils.buildQuery(filterStore));
 	let query = $derived(tableAPI.extendQuery(defaultQuery, queryExtensions));
 
-	const stbSelectedIds = $derived(
-		[...stbSelected].map(i => tableAPI.getRowId(cachedRows[i], i))
-	);
+	const stbSelectedIds = $derived([...stbSelected].map((i) => tableAPI.getRowId(cachedRows[i], i)));
 
 	const stbSelectedRows = $derived.by(() => {
-		const selectedRows = [...stbSelected].map(i => cachedRows[i]).filter(Boolean);
+		const selectedRows = [...stbSelected].map((i) => cachedRows[i]).filter(Boolean);
 		if (maxSelected === 1) {
 			return selectedRows.length > 0 ? selectedRows[0] : [];
 		}
@@ -1470,7 +1488,7 @@
 	$effect(() => {
 		cachedRows;
 		untrack(() => {
-			stbSelected = new Set([...stbSelected].filter(i => i < cachedRows.length));
+			stbSelected = new Set([...stbSelected].filter((i) => i < cachedRows.length));
 		});
 	});
 
@@ -1582,7 +1600,6 @@
 		clearInterval(timer);
 		clearTimeout(scrollLockTimeout);
 	});
-
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1653,8 +1670,7 @@
 						columnOptions={{
 							...superColumns[0],
 							isFirst: true,
-							isFirstInsertable:
-								superColumns.findIndex((c) => c.canEdit && c.canInsert) === 0,
+							isFirstInsertable: superColumns.findIndex((c) => c.canEdit && c.canInsert) === 0,
 							isLast: superColumns?.length == 1 && !showButtonColumnRight && canScroll
 						}}
 					/>

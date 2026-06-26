@@ -9,8 +9,7 @@ export default function positionDropdown(element, opts) {
 		updatePosition(latestOpts);
 	};
 
-	const formatRectKey = (rect) =>
-		`${rect.top},${rect.left},${rect.width},${rect.height}`;
+	const formatRectKey = (rect) => `${rect.top},${rect.left},${rect.width},${rect.height}`;
 
 	const trackAnchor = () => {
 		const { anchor } = latestOpts;

@@ -1,7 +1,7 @@
 <script>
-  let { children } = $props();
+	let { children } = $props();
 </script>
 
 <div class="st-control-columns">
-  {@render children?.()}
+	{@render children?.()}
 </div>

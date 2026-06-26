@@ -41,9 +41,7 @@
 	let working = $state(false);
 
 	let tooltipOptions = $derived(
-		tooltip
-			? { text: tooltip, whenTruncated: false }
-			: { enabled: false }
+		tooltip ? { text: tooltip, whenTruncated: false } : { enabled: false }
 	);
 	let ui_timer: ReturnType<typeof setInterval>;
 	let elapsed = 0;

@@ -11,15 +11,10 @@ export function clampFocusIdx(idx: number, count: number): number {
 	return Math.min(Math.max(idx, -1), count - 1);
 }
 
-export function shouldFetchMore(
-	element: HTMLElement,
-	loading: boolean,
-	hasMore: boolean
-): boolean {
+export function shouldFetchMore(element: HTMLElement, loading: boolean, hasMore: boolean): boolean {
 	if (loading || !hasMore) return false;
 	return (
-		element.scrollTop + element.clientHeight >=
-		element.scrollHeight - PICKER_SCROLL_THRESHOLD_PX
+		element.scrollTop + element.clientHeight >= element.scrollHeight - PICKER_SCROLL_THRESHOLD_PX
 	);
 }
 
@@ -116,8 +111,15 @@ export function schedulePickerFetchUpdate(options: {
 	debounceMs?: number;
 	onScheduled?: () => void;
 }) {
-	const { fetch, timer, setTimer, query, limit, debounceMs = PICKER_SEARCH_DEBOUNCE_MS, onScheduled } =
-		options;
+	const {
+		fetch,
+		timer,
+		setTimer,
+		query,
+		limit,
+		debounceMs = PICKER_SEARCH_DEBOUNCE_MS,
+		onScheduled
+	} = options;
 
 	if (!fetch) return;
 

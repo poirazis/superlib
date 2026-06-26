@@ -276,11 +276,7 @@
 					}
 					this.cancel();
 				}
-				if (
-					isPopup &&
-					(e.key === ' ' || e.keyCode === 32) &&
-					!typingInEditor
-				) {
+				if (isPopup && (e.key === ' ' || e.keyCode === 32) && !typingInEditor) {
 					e.preventDefault();
 					this.toggle();
 				}
@@ -403,21 +399,21 @@
 			on:keydown={csm.popupKeydown}
 		>
 			<div class="json-popup">
-			<div class="json-popup-header">
-				<span>JSON Editor</span>
-				{#if !isValidJson}
-					<span class="json-popup-error">Invalid JSON</span>
-				{/if}
-			</div>
-			<textarea
-				bind:this={editor}
-				class="json-popup-editor"
-				class:invalid={!isValidJson}
-				placeholder={placeholder ?? 'Enter JSON'}
-				value={editValue}
-				on:input={csm.change}
-				on:keydown={csm.keydown}
-			></textarea>
+				<div class="json-popup-header">
+					<span>JSON Editor</span>
+					{#if !isValidJson}
+						<span class="json-popup-error">Invalid JSON</span>
+					{/if}
+				</div>
+				<textarea
+					bind:this={editor}
+					class="json-popup-editor"
+					class:invalid={!isValidJson}
+					placeholder={placeholder ?? 'Enter JSON'}
+					value={editValue}
+					on:input={csm.change}
+					on:keydown={csm.keydown}
+				></textarea>
 			</div>
 		</div>
 	</SuperPopover>

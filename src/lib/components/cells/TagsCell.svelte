@@ -507,43 +507,40 @@
 	>
 		<div class="value">
 			<div class="tags" class:editing={inEdit} style:justify-content={align ?? 'flex-start'}>
-			{#if isEmpty && !inEdit && shouldShowCellViewChrome(role, inEdit)}
-				<span class="placeholder-text">
-					{resolveEmptyViewText(placeholder || 'Add some Tags', role, inEdit)}
-				</span>
-			{/if}
-			{#each localValue as tag, idx (tag)}
-				<div
-					class="tag"
-					style:--option-color={tagColors[tag]}
-				>
-					<span class="tag-wrap">
-						<span>{tag}</span>
+				{#if isEmpty && !inEdit && shouldShowCellViewChrome(role, inEdit)}
+					<span class="placeholder-text">
+						{resolveEmptyViewText(placeholder || 'Add some Tags', role, inEdit)}
 					</span>
-					{#if inEdit}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<i
-							class="ph ph-x remove-icon"
-							on:mousedown|preventDefault|stopPropagation={() => toggleOption(tag)}
-						></i>
-					{/if}
-				</div>
-			{/each}
+				{/if}
+				{#each localValue as tag, idx (tag)}
+					<div class="tag" style:--option-color={tagColors[tag]}>
+						<span class="tag-wrap">
+							<span>{tag}</span>
+						</span>
+						{#if inEdit}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<i
+								class="ph ph-x remove-icon"
+								on:mousedown|preventDefault|stopPropagation={() => toggleOption(tag)}
+							></i>
+						{/if}
+					</div>
+				{/each}
 
-			{#if inEdit}
-				<!-- svelte-ignore event_directive_deprecated -->
-				<input
-					bind:this={editor}
-					class="editor tag-input"
-					type="text"
-					{tabindex}
-					placeholder={isEmpty ? placeholder || 'Add tag...' : ''}
-					value={filterTerm}
-					on:input={handleEditorInput}
-					on:keydown={handleEditorKeydown}
-					on:focusout={csm.focusout}
-				/>
-			{/if}
+				{#if inEdit}
+					<!-- svelte-ignore event_directive_deprecated -->
+					<input
+						bind:this={editor}
+						class="editor tag-input"
+						type="text"
+						{tabindex}
+						placeholder={isEmpty ? placeholder || 'Add tag...' : ''}
+						value={filterTerm}
+						on:input={handleEditorInput}
+						on:keydown={handleEditorKeydown}
+						on:focusout={csm.focusout}
+					/>
+				{/if}
 			</div>
 		</div>
 	</div>

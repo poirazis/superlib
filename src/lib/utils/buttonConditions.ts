@@ -264,10 +264,7 @@ export function splitRowMenuButtons<T>(
 	};
 }
 
-export function configuredButtonKey(
-	button: Record<string, unknown> | undefined,
-	index: number
-) {
+export function configuredButtonKey(button: Record<string, unknown> | undefined, index: number) {
 	const id = button?._id ?? button?.id;
 	if (id != null && id !== '') {
 		return String(id);

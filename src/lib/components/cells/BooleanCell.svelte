@@ -11,7 +11,6 @@
 	} from '../../utils/columnAlign.ts';
 	import { normalizeBooleanValue } from './helpers';
 
-
 	const dispatch = createEventDispatcher();
 
 	let {
@@ -38,9 +37,7 @@
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
 	let debounceMs = $derived(config.debounce ?? null);
-	let controlType = $derived(
-		config.controlType ?? (isTableCell ? 'checkbox' : 'switch')
-	);
+	let controlType = $derived(config.controlType ?? (isTableCell ? 'checkbox' : 'switch'));
 	let inlineLabel = $derived(config.inlineLabel);
 	let controlIcon = $derived(config.controlIcon ?? 'ph ph-check');
 	let selectedColor = $derived(config.selectedColor || 'var(--spectrum-global-color-blue-700)');
@@ -168,12 +165,8 @@
 	});
 
 	let inEdit = $derived($csm === 'editing');
-	let isDirty = $derived(
-		inEdit && normalizeBoolean(localValue) !== normalizeBoolean(value)
-	);
-	let tableCheckboxDisabled = $derived(
-		isTableCell && (disabled || readonly || !inEdit)
-	);
+	let isDirty = $derived(inEdit && normalizeBoolean(localValue) !== normalizeBoolean(value));
+	let tableCheckboxDisabled = $derived(isTableCell && (disabled || readonly || !inEdit));
 
 	$effect(() => {
 		if (!inEdit) {

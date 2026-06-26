@@ -25,10 +25,10 @@ Remaining legacy APIs that are still acceptable:
 
 This is required for Budibase: the host runtime supports `t.event()` but not `t.delegated()`, so attribute-style delegatable events crash at runtime. Superlib ships inside plugin bundles that run in that host.
 
-| Syntax | Use in superlib? |
-|--------|------------------|
+| Syntax                                                | Use in superlib?  |
+| ----------------------------------------------------- | ----------------- |
 | `on:click={fn}`, `on:change={fn}`, `on:input={fn}`, … | **Yes — default** |
-| `onclick={fn}` etc. for delegatable events | **No** |
+| `onclick={fn}` etc. for delegatable events            | **No**            |
 
 Non-delegatable events (`wheel`, `mouseleave`, `mouseenter`, `scroll`) may use attribute syntax only in a **separate** `.svelte` file. Do not mix `on:` and `onfoo=` in the same file.
 

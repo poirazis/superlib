@@ -9,7 +9,6 @@
 		attachmentCopyText,
 		isImage,
 		isMultiAttachment,
-
 		normalizeAttachments,
 		uploadAttachments,
 		copyAndTransition,
@@ -57,7 +56,6 @@
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let canSelect = $derived(!readonly && !disabled && !isGallery);
-
 
 	let canDelete = $derived(!readonly && !disabled && !isGallery);
 	let slotted = $derived(config.slotted);
@@ -209,8 +207,7 @@
 
 	let inEdit = $derived($csm === 'editing');
 	let isDirty = $derived(
-		inEdit &&
-			JSON.stringify(localValue) !== JSON.stringify(normalizeAttachments(value, multi))
+		inEdit && JSON.stringify(localValue) !== JSON.stringify(normalizeAttachments(value, multi))
 	);
 
 	$effect(() => {

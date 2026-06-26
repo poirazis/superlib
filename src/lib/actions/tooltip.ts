@@ -118,7 +118,10 @@ function createTooltipElement() {
 
 function positionTooltip(tooltip: HTMLElement, anchor: DOMRect, position: TooltipPosition) {
 	const tooltipRect = tooltip.getBoundingClientRect();
-	const [vertical, horizontal] = position.split('-') as ['above' | 'below', 'center' | 'start' | 'end'];
+	const [vertical, horizontal] = position.split('-') as [
+		'above' | 'below',
+		'center' | 'start' | 'end'
+	];
 
 	let top =
 		vertical === 'above'
@@ -203,13 +206,7 @@ export function tooltip(element: HTMLElement, options?: TooltipParam) {
 				? config.text || element.textContent || ''
 				: config.text || '';
 			if (!tooltipText) return;
-			showTooltip(
-				element,
-				tooltipText,
-				config.delay,
-				config.whenTruncated,
-				config.position
-			);
+			showTooltip(element, tooltipText, config.delay, config.whenTruncated, config.position);
 		};
 
 		element.addEventListener('mouseenter', handleMouseenter);

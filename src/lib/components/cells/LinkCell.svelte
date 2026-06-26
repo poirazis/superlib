@@ -68,9 +68,7 @@
 	let multirow = $derived(
 		config.controlType === 'expanded' && ((localValue?.length ?? 0) > 1 || $csm === 'editing')
 	);
-	let singleSelect = $derived(
-		!multi || fieldSchema?.relationshipType === 'one-to-many'
-	);
+	let singleSelect = $derived(!multi || fieldSchema?.relationshipType === 'one-to-many');
 	let placeholder = $derived(config.placeholder || '');
 	let disabled = $derived(config.disabled);
 	let readonly = $derived(config.readonly);
@@ -129,7 +127,10 @@
 		clearTimeout(pickerSearchTimer);
 	};
 
-	const parseLinkItem = (item: unknown, primaryDisplay: string | undefined = undefined): LinkItem | null => {
+	const parseLinkItem = (
+		item: unknown,
+		primaryDisplay: string | undefined = undefined
+	): LinkItem | null => {
 		if (!item) return null;
 
 		if (typeof item === 'string') {
@@ -666,7 +667,9 @@
 					/>
 					{#if popupSearchTerm}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
-						<i class="ph ph-x clear-icon" on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
+						<i
+							class="ph ph-x clear-icon"
+							on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
 						></i>
 					{/if}
 				</div>

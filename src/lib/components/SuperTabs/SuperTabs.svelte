@@ -23,9 +23,7 @@
 	} = $props();
 
 	let isVertical = $derived(tabsPosition == 'left' || theme === 'list');
-	let justify = $derived(
-		direction === 'row' ? (hAlign ?? 'flex-start') : (vAlign ?? 'flex-start')
-	);
+	let justify = $derived(direction === 'row' ? (hAlign ?? 'flex-start') : (vAlign ?? 'flex-start'));
 	let button = $derived(theme === 'buttons');
 	let useSlidingIndicator = $derived(theme === 'buttons' || theme === 'list');
 	let tabTooltipPosition = $derived(isVertical ? 'below-start' : 'above-center');
@@ -137,7 +135,7 @@
 			{#if indicatorVisible}
 				<div
 					class="tab-indicator"
-					class:button={button}
+					class:button
 					class:list={theme === 'list'}
 					style:top="{indicatorTop}px"
 					style:left="{indicatorLeft}px"

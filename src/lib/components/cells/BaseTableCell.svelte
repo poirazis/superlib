@@ -32,9 +32,7 @@
 			show24HTime: cellOptions.show24HTime
 		})
 	);
-	let cellText = $derived(
-		typeof displayValue === 'string' ? displayValue : fallbackDisplayValue
-	);
+	let cellText = $derived(typeof displayValue === 'string' ? displayValue : fallbackDisplayValue);
 	let isBooleanColumn = $derived(fieldSchema?.type === 'boolean');
 	let isAttachmentColumn = $derived(isAttachmentFieldType(fieldSchema?.type));
 	let attachmentItems = $derived(
@@ -42,9 +40,7 @@
 	);
 	let showAttachmentPills = $derived(isAttachmentColumn && attachmentItems.length > 0);
 	let visibleAttachmentItems = $derived(attachmentItems.slice(0, 5));
-	let hiddenAttachmentCount = $derived(
-		attachmentItems.length > 5 ? attachmentItems.length - 5 : 0
-	);
+	let hiddenAttachmentCount = $derived(attachmentItems.length > 5 ? attachmentItems.length - 5 : 0);
 
 	let showOptionPill = $derived(
 		(viewMode === 'pills' && colors) || (viewMode === 'pills' && fieldSchema?.type == 'link')

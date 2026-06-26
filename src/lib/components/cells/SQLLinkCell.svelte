@@ -75,9 +75,7 @@
 	let showDirty = $derived(config.showDirty);
 	let debounceMs = $derived(config.debounce ?? null);
 	let searchEnabled = $derived(config.search ?? true);
-	let isDirty = $derived(
-		inEdit && !linkSelectionEqual(localValue, value, relatedField)
-	);
+	let isDirty = $derived(inEdit && !linkSelectionEqual(localValue, value, relatedField));
 	let writable = $derived(!disabled && !readonly);
 	let isEmpty = $derived((localValue?.length ?? 0) < 1);
 	let tabindex = $state(0);
@@ -128,7 +126,10 @@
 		clearTimeout(pickerSearchTimer);
 	};
 
-	const parseRow = (row: Record<string, unknown>, displayField: string | undefined = undefined): SQLLinkItem | null => {
+	const parseRow = (
+		row: Record<string, unknown>,
+		displayField: string | undefined = undefined
+	): SQLLinkItem | null => {
 		const rowId = row[relatedField];
 		if (rowId == null) return null;
 
@@ -671,7 +672,9 @@
 					/>
 					{#if popupSearchTerm}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
-						<i class="ph ph-x clear-icon" on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
+						<i
+							class="ph ph-x clear-icon"
+							on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
 						></i>
 					{/if}
 				</div>

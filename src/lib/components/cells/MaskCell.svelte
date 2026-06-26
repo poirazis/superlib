@@ -6,7 +6,6 @@
 	import { copyAndTransition, deferJustCopied } from './helpers';
 	import { isTableCellRole, shouldShowCellViewChrome } from './helpers';
 
-
 	if (MaskedPattern && Masked.overloads) {
 		if (!Masked.overloads.find((o) => o.mask === MaskedPattern)) {
 			Masked.overloads.unshift({ mask: MaskedPattern });

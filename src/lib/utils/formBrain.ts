@@ -1,9 +1,5 @@
 import type { Writable } from 'svelte/store';
-import {
-	fieldComponentMap,
-	getDefaultFieldComponent,
-	specialFields
-} from './formFieldMap.ts';
+import { fieldComponentMap, getDefaultFieldComponent, specialFields } from './formFieldMap.ts';
 import { deriveActiveFields, resolveFieldInnerType } from './deriveActiveFields.ts';
 
 export type FormBrainOptions = {
@@ -78,8 +74,7 @@ export function createFormBrain(options: FormBrainOptions) {
 				? schema[fieldName.split('.')[0]]
 				: schema[fieldName];
 			const schemaFieldType = schemaField?.type as string | undefined;
-			const readonlyFromSchema =
-				schemaFieldType === 'formula' || Boolean(schemaField?.readonly);
+			const readonlyFromSchema = schemaFieldType === 'formula' || Boolean(schemaField?.readonly);
 
 			return {
 				...sanitizeFieldProps(field),

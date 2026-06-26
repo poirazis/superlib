@@ -494,11 +494,7 @@
 		{#snippet children()}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore event_directive_deprecated -->
-			<div
-				class="popup"
-				on:focusout={csm.popupFocusout}
-				on:keydown={csm.popupKeydown}
-			>
+			<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
 				<div
 					class="range-picker-container"
 					style:--date-picker-background="var(--spectrum-global-color-gray-75)"

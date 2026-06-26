@@ -125,9 +125,7 @@
 	let isDirty = $derived(
 		inEdit &&
 			JSON.stringify(outputValue) !==
-				JSON.stringify(
-					Array.isArray(value) ? value.filter((x) => x) : value ? [String(value)] : []
-				)
+				JSON.stringify(Array.isArray(value) ? value.filter((x) => x) : value ? [String(value)] : [])
 	);
 	let rowLocked = $derived(readonly || disabled || !canEdit);
 	let dirty = $derived(config.dirty);
