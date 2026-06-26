@@ -6,11 +6,6 @@
 	"include": [
 		"src/lib/components/Button.svelte",
 		"src/lib/components/SuperLightbox/SuperLightbox.svelte",
-		"src/lib/components/cells/BaseCell.svelte",
-		"src/lib/components/cells/AttachmentCell.svelte",
-		"src/lib/components/cells/AttachmentsCell.svelte",
-		"src/lib/components/cells/AttachmentExpandedCell.svelte",
-		"src/lib/components/cells/AttachmentSliderCell.svelte",
 		"src/lib/components/cells/helpers.ts",
 		"src/lib/components/cells/types.ts",
 		"src/lib/utils/buttonConditions.ts",
