@@ -3,19 +3,21 @@
 	import BaseCell from './BaseCell.svelte';
 	import Switch from '../UI/elements/Switch.svelte';
 	import Radiobox from '../UI/elements/Radiobox.svelte';
-	import SimpleButton from '../UI/elements/SimpleButton.svelte';
+	import SimpleButton from '../buttons/SimpleButton.svelte';
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		copyAndTransition,
+		deferJustCopied,
+
+		emittedFieldValuesEqual,
+		resolveEmptyViewText,
+		resolveCustomOptionColor,
+		resolveOptionColor
+	} from './helpers';
+	import type { CellOption as Option } from './types';
 
 	const { API, fetchData, QueryUtils } = getContext('sdk');
-
-	interface Option {
-		label: string;
-		value: any;
-		color?: string;
-		icon?: string;
-	}
 
 	let {
 		id,
@@ -35,6 +37,7 @@
 	let disabled = $derived(cellOptions?.disabled);
 	let readonly = $derived(cellOptions?.readonly);
 	let copyable = $derived(cellOptions?.copyable);
+	let copyIcon = $derived(cellOptions?.copyIcon ?? 'always');
 	let role = $derived(cellOptions?.role);
 	let error = $derived(cellOptions?.error);
 	let icon = $derived(cellOptions?.icon);
@@ -42,7 +45,7 @@
 	let controlType = $derived(cellOptions?.controlType ?? 'switch');
 	let toggleAll = $derived(cellOptions?.toggleAll);
 	let showDirty = $derived(cellOptions?.showDirty);
-	let debounceDelay = $derived(cellOptions?.debounce);
+	let debounceMs = $derived(cellOptions?.debounce ?? null);
 	let isButtons = $derived(controlType === 'buttons');
 	let isRadios = $derived(controlType === 'radio');
 	let isSwitches = $derived(controlType === 'switch');
@@ -61,7 +64,7 @@
 			return inclusion.map((opt) => ({
 				label: opt,
 				value: opt,
-				color: fieldSchema?.optionColors?.[opt]
+				color: resolveOptionColor(opt, fieldSchema)
 			}));
 		}
 
@@ -70,7 +73,7 @@
 				cellOptions.customOptions?.map((opt) => ({
 					label: opt.label,
 					value: opt.value,
-					color: opt.color,
+					color: resolveCustomOptionColor(opt.value, fieldSchema, cellOptions.customOptions),
 					icon: opt.icon
 				})) ?? []
 			);
@@ -92,7 +95,6 @@
 
 	let anchor = $state<HTMLElement | null>(null);
 	let localValue = $state<Option[]>([]);
-	let originalValue = $state('[]');
 
 	let isEmpty = $derived(localValue?.length < 1);
 	let allSelected = $derived((options?.length ?? 0) > 0 && localValue.length === options.length);
@@ -141,39 +143,26 @@
 		}
 	}
 
-	function scheduleChange() {
-		if (!isButtons && !isRadios && !debounceDelay) return;
-
-		clearTimeout(timer);
-		timer = setTimeout(() => {
-			dispatch('change', getEmittedValue());
-			originalValue = JSON.stringify(getEmittedValue());
-		}, debounceDelay ?? 0);
-	}
-
 	function handleToggle(newValue: string) {
 		if (disabled || readonly) return;
 		ensureEditing();
 		csm.selectOption(newValue);
-
-		if (isButtons || isRadios || debounceDelay) {
-			scheduleChange();
-		}
+		csm.change();
 	}
 
 	function handleToggleAll() {
 		if (disabled || readonly) return;
 		ensureEditing();
 		csm.toggleAll();
-
-		if (debounceDelay) {
-			scheduleChange();
-		}
+		csm.change();
 	}
 
 	let csm = fsm('view', {
 		'*': {
-			goTo: (state) => state
+			goTo: (state) => state,
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			focus: () => {
@@ -183,7 +172,7 @@
 		},
 		editing: {
 			_enter: () => {
-				originalValue = JSON.stringify(getEmittedValue());
+				localValue = resolveToOptions(value);
 
 				if (!options?.length) {
 					console.warn('No options available');
@@ -195,8 +184,24 @@
 					return 'view';
 				}
 			},
-			_exit: () => {
-				dispatch('change', getEmittedValue());
+			_exit: () => {},
+			change() {
+				if (debounceMs) {
+					clearTimeout(timer);
+					timer = setTimeout(() => {
+						dispatch('change', getEmittedValue());
+					}, debounceMs);
+				}
+			},
+			submit() {
+				if (isDirty && !debounceMs) {
+					dispatch('change', getEmittedValue());
+				}
+			},
+			cancel() {
+				clearTimeout(timer);
+				localValue = resolveToOptions(value);
+				return 'view';
 			},
 			toggleAll: () => {
 				if (allSelected) {
@@ -230,11 +235,17 @@
 				if (anchor?.contains(e.relatedTarget as Node) || anchor?.contains(document.activeElement)) {
 					return;
 				}
+				if (debounceMs && isDirty) {
+					clearTimeout(timer);
+					dispatch('change', getEmittedValue());
+				} else {
+					this.submit();
+				}
 				return 'view';
 			}
 		},
 		copyable: {
-			click() {
+			copy() {
 				const copyValue = localValue.map((option) => option.label).join(', ');
 
 				copyAndTransition(() => csm, copyValue);
@@ -242,7 +253,7 @@
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -250,12 +261,16 @@
 	});
 
 	let canEdit = $derived($csm === 'editing');
-	let isDirty = $derived(canEdit && originalValue !== JSON.stringify(getEmittedValue()));
+	let inEdit = $derived($csm === 'editing');
+	let dirty = $derived(cellOptions?.dirty);
+	let isDirty = $derived(inEdit && !emittedFieldValuesEqual(getEmittedValue(), value));
 
 	$effect(() => {
 		void value;
 		void options;
-		localValue = resolveToOptions(value);
+		if (!inEdit) {
+			localValue = resolveToOptions(value);
+		}
 	});
 
 	$effect(() => {
@@ -309,13 +324,15 @@
 	{icon}
 	naked={controlType === 'buttons'}
 	multirow={cellMultirow}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
+	{copyIcon}
+	align={cellOptions?.align}
 	{buttons}
 >
 	{#key controlType}
 		{#if isRadios}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="radios column" class:inline={role === 'inline'} class:view-mode={!canEdit}>
+			<div class="radios column" class:view-mode={!canEdit}>
 				{#key options}
 					{#if options?.length}
 						{#each options as option (option.value)}
@@ -325,12 +342,16 @@
 								viewMode={!canEdit}
 								color={option.color}
 								label={option.label || option.value}
-								on:select={() => handleToggle(option.value)}
+								on:click={() => handleToggle(option.value)}
 							/>
 						{/each}
 					{:else}
 						<div class="empty-options">
-							{_message || cellOptions?.placeholder || 'No options available'}
+							{resolveEmptyViewText(
+								_message || cellOptions?.placeholder || 'No options available',
+								role,
+								canEdit
+							)}
 						</div>
 					{/if}
 				{/key}
@@ -348,12 +369,16 @@
 								color={option.color}
 								icon={option.icon}
 								label={option.label || option.value}
-								on:select={() => handleToggle(option.value)}
+								on:click={() => handleToggle(option.value)}
 							/>
 						{/each}
 					{:else}
 						<div class="empty-options">
-							{_message || cellOptions?.placeholder || 'No options available'}
+							{resolveEmptyViewText(
+								_message || cellOptions?.placeholder || 'No options available',
+								role,
+								canEdit
+							)}
 						</div>
 					{/if}
 				{/key}
@@ -400,7 +425,11 @@
 						{/each}
 					{:else}
 						<div class="empty-options">
-							{_message || cellOptions?.placeholder || 'No options available'}
+							{resolveEmptyViewText(
+								_message || cellOptions?.placeholder || 'No options available',
+								role,
+								canEdit
+							)}
 						</div>
 					{/if}
 				{/key}
@@ -495,11 +524,6 @@
 		padding: 0.25rem 0.25rem;
 		min-width: 0;
 		width: 100%;
-	}
-
-	.radios.inline {
-		border: 1px solid var(--spectrum-global-color-gray-300);
-		border-radius: 4px;
 	}
 
 	.radios.column {

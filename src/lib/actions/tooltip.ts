@@ -35,7 +35,7 @@ const TOOLTIP_GAP = 4;
 function parseOptions(options: TooltipParam): TooltipConfig {
 	if (options == null) {
 		return {
-			active: false,
+			active: true,
 			text: '',
 			delay: 500,
 			whenTruncated: true,
@@ -199,7 +199,9 @@ export function tooltip(element: HTMLElement, options?: TooltipParam) {
 		if (!config.active) return;
 
 		handleMouseenter = () => {
-			const tooltipText = config.text || element.textContent || '';
+			const tooltipText = config.whenTruncated
+				? config.text || element.textContent || ''
+				: config.text || '';
 			if (!tooltipText) return;
 			showTooltip(
 				element,

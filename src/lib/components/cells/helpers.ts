@@ -1,4 +1,566 @@
-// Phosphor Icons data
+import type { FieldSchema, FieldType } from '@budibase/types';
+import { flexAlignToCellAlign } from '../../utils/columnAlign.ts';
+import type {
+	AttachmentItem,
+	FsmController,
+	OptionFieldSchema,
+	ParseDateOptions,
+	ReadOnlyOptionCellOptions,
+	SchemaLike,
+	TableCellFormatOptions
+} from './types.ts';
+
+/** Right-aligned copyable cells keep the copy icon visible to avoid empty trailing space. */
+export function resolveCopyIconOnHover(
+	copyIcon?: string,
+	align?: string | null
+): boolean {
+	if (copyIcon !== 'onhover') return false;
+	if (align == null || String(align).trim() === '') return true;
+	return flexAlignToCellAlign(align) !== 'right';
+}
+
+export function emittedFieldValuesEqual(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (Array.isArray(a) && Array.isArray(b)) {
+		return JSON.stringify(a) === JSON.stringify(b);
+	}
+	if (a == null && b == null) return true;
+	if (a == null || b == null) return false;
+	return String(a) === String(b);
+}
+
+function extractLinkSelectionIds(value: unknown, idKey = '_id'): string[] {
+	if (value == null || value === '') return [];
+
+	if (Array.isArray(value)) {
+		return value
+			.map((item) => {
+				if (typeof item === 'string') return item;
+				if (item && typeof item === 'object' && idKey in item) {
+					return String((item as Record<string, unknown>)[idKey]);
+				}
+				return null;
+			})
+			.filter((id): id is string => id != null);
+	}
+
+	if (typeof value === 'string') return [value];
+	if (typeof value === 'object' && value !== null && idKey in value) {
+		return [String((value as Record<string, unknown>)[idKey])];
+	}
+
+	return [];
+}
+
+export function firstRowKey(row: Record<string, unknown> | undefined): string | undefined {
+	if (!row) return undefined;
+	const keys = Object.keys(row);
+	return keys.length ? keys[0] : undefined;
+}
+
+export function inferDisplayFieldFromRow(
+	row: Record<string, unknown> | undefined
+): string | undefined {
+	return firstRowKey(row);
+}
+
+/** Resolve a link row label from primaryDisplay, a known field, or the first row key. */
+export function resolveLinkRowDisplay(
+	row: Record<string, unknown>,
+	displayField?: string
+): string {
+	if (row.primaryDisplay != null && row.primaryDisplay !== '') {
+		return String(row.primaryDisplay);
+	}
+
+	if (displayField && row[displayField] != null && row[displayField] !== '') {
+		return String(row[displayField]);
+	}
+
+	const firstKey = firstRowKey(row);
+	if (firstKey && row[firstKey] != null && row[firstKey] !== '') {
+		return String(row[firstKey]);
+	}
+
+	return String(row._id ?? row.id ?? '');
+}
+
+/** Compare link/SQL-link emitted values by selected ids only (ignores label enrichment). */
+export function linkSelectionEqual(a: unknown, b: unknown, idKey = '_id'): boolean {
+	const aIds = extractLinkSelectionIds(a, idKey).sort().join('\0');
+	const bIds = extractLinkSelectionIds(b, idKey).sort().join('\0');
+	return aIds === bIds;
+}
+
+export function isFocusMovingWithin(
+	anchor: HTMLElement | null | undefined,
+	e: FocusEvent
+): boolean {
+	const related = e.relatedTarget as Node | null;
+	return !!related && !!anchor?.contains(related);
+}
+
+export function normalizeBooleanValue(value: unknown): boolean {
+	if (value === true || value === 1) return true;
+	if (value === false || value === 0 || value == null || value === '') return false;
+	if (typeof value === 'string') {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+		if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+	}
+	return false;
+}
+
+// --- Attachments ---
+
+export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+
+const ATTACHMENT_SINGLE = 'attachment_single' as FieldType;
+
+export function isImage(attachment: AttachmentItem | null | undefined) {
+	return IMAGE_EXTENSIONS.includes(attachment?.extension?.toLowerCase() ?? '');
+}
+
+export function isMultiAttachment(fieldSchema: Pick<FieldSchema, 'type'> | null | undefined) {
+	const type = fieldSchema?.type;
+	if (!type) return false;
+	return !String(type).includes('single');
+}
+
+export function normalizeSingleAttachment(
+	value: AttachmentItem | AttachmentItem[] | string | null | undefined
+): AttachmentItem[] {
+	if (value == null || value === '') return [];
+
+	if (typeof value === 'string') {
+		try {
+			return normalizeSingleAttachment(JSON.parse(value) as AttachmentItem | AttachmentItem[]);
+		} catch {
+			return [];
+		}
+	}
+
+	if (Array.isArray(value)) {
+		const item = value.find((entry) => entry != null && typeof entry === 'object');
+		return item ? [item] : [];
+	}
+
+	if (typeof value === 'object') {
+		return [value];
+	}
+
+	return [];
+}
+
+export function hasAttachmentValue(value: unknown): boolean {
+	return normalizeSingleAttachment(value as AttachmentItem | AttachmentItem[] | string | null | undefined)
+		.length > 0;
+}
+
+export function normalizeAttachments(
+	value: AttachmentItem | AttachmentItem[] | string | null | undefined,
+	multi: boolean
+): AttachmentItem[] {
+	if (value == null || value === '') return [];
+	if (multi) return Array.isArray(value) ? value : [value as AttachmentItem];
+	return normalizeSingleAttachment(value);
+}
+
+export function isAttachmentFieldType(type?: string): boolean {
+	return type === 'attachment' || type === 'attachment_single';
+}
+
+export function formatAttachmentExtensionLabel(
+	attachment: AttachmentItem | null | undefined
+): string {
+	const ext = attachment?.extension?.trim();
+	if (ext) return ext.toUpperCase();
+
+	const name = attachment?.name?.trim();
+	if (!name) return '';
+
+	const fromName = name.includes('.') ? name.split('.').pop() : '';
+	return fromName ? fromName.toUpperCase() : name.toUpperCase();
+}
+
+export function normalizeTableCellAttachments(
+	value: unknown,
+	fieldSchema?: SchemaLike
+): AttachmentItem[] {
+	const type = fieldSchema?.type;
+	if (type === 'attachment_single') {
+		return normalizeSingleAttachment(
+			value as AttachmentItem | AttachmentItem[] | string | null | undefined
+		);
+	}
+	if (type === 'attachment') {
+		return normalizeAttachments(
+			value as AttachmentItem | AttachmentItem[] | string | null | undefined,
+			true
+		);
+	}
+	return [];
+}
+
+export async function uploadAttachments(
+	API: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> },
+	tableid: string,
+	fileList: File[]
+): Promise<AttachmentItem[]> {
+	const data = new FormData();
+	for (let i = 0; i < fileList.length; i++) {
+		data.append('file', fileList[i]);
+	}
+	return API.uploadAttachment(tableid, data);
+}
+
+export function isTableCellRole(role?: string) {
+	return role === 'cell';
+}
+
+/** Form fields show placeholders and field icons in view; table cells only while editing. */
+export function shouldShowCellViewChrome(role?: string, inEdit = false): boolean {
+	return !isTableCellRole(role) || inEdit;
+}
+
+export function resolveEmptyViewText(
+	placeholder: unknown,
+	role?: string,
+	inEdit = false
+): string {
+	if (!shouldShowCellViewChrome(role, inEdit)) {
+		return '';
+	}
+	return placeholder == null ? '' : String(placeholder);
+}
+
+export function attachmentCopyText(attachments: AttachmentItem[] | null | undefined): string {
+	if (!attachments?.length) return '';
+	return attachments
+		.map((item) => item?.name || item?.url || '')
+		.filter(Boolean)
+		.join(', ');
+}
+
+// --- Clipboard ---
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+	try {
+		await navigator.clipboard.writeText(text);
+		return true;
+	} catch (err) {
+		console.error('Failed to copy to clipboard:', err);
+		return false;
+	}
+}
+
+export function deferJustCopied(getFsm: () => FsmController, returnState = 'copyable') {
+	return {
+		_enter() {
+			setTimeout(() => getFsm().goTo(returnState), 400);
+		}
+	};
+}
+
+export async function copyAndTransition(getFsm: () => FsmController, text: string): Promise<void> {
+	if (await copyTextToClipboard(text)) {
+		getFsm().goTo('justCopied');
+	}
+}
+
+// --- Option colors ---
+
+function getInclusionIndex(value: unknown, inclusion?: unknown[]) {
+	if (!Array.isArray(inclusion) || value == null || value === '') return -1;
+
+	const key = String(value);
+	const directIndex = inclusion.indexOf(value);
+	if (directIndex >= 0) return directIndex;
+
+	return inclusion.findIndex((item) => String(item) === key);
+}
+
+export function resolveCustomOptionColor(
+	value: unknown,
+	fieldSchema?: OptionFieldSchema,
+	customOptions?: Array<{ label?: string; value?: unknown }>
+): string | undefined {
+	const schemaColor = resolveOptionColor(value, fieldSchema);
+	if (schemaColor) return schemaColor;
+
+	if (!Array.isArray(customOptions) || value == null || value === '') {
+		return undefined;
+	}
+
+	const key = String(value);
+	const customIndex = customOptions.findIndex((opt) => String(opt.value ?? opt.label) === key);
+	if (customIndex < 0) return undefined;
+
+	const optionColors = fieldSchema?.optionColors;
+	const inclusion = fieldSchema?.constraints?.inclusion;
+
+	if (!Array.isArray(optionColors) || !Array.isArray(inclusion) || customIndex >= optionColors.length) {
+		return undefined;
+	}
+
+	const inclusionValue = inclusion[customIndex];
+	if (inclusionValue == null || String(inclusionValue) !== key) {
+		return undefined;
+	}
+
+	return optionColors[customIndex] || undefined;
+}
+
+export function resolveOptionColor(
+	value: unknown,
+	fieldSchema?: OptionFieldSchema
+): string | undefined {
+	if (value == null || value === '') return undefined;
+
+	const key = String(value);
+	const optionColors = fieldSchema?.optionColors;
+	const inclusion = fieldSchema?.constraints?.inclusion;
+	const index = getInclusionIndex(value, inclusion);
+
+	if (Array.isArray(optionColors) && index >= 0) {
+		const explicit = optionColors[index];
+		if (explicit) return explicit;
+	}
+
+	if (optionColors && !Array.isArray(optionColors) && optionColors[key]) {
+		return optionColors[key];
+	}
+
+	return undefined;
+}
+
+export function resolveReadOnlyOptionDisplay(
+	value: unknown,
+	fieldSchema: OptionFieldSchema | undefined,
+	displayLabel: string,
+	cellOptions: ReadOnlyOptionCellOptions = {}
+): { label: string; color?: string } {
+	const key = String(value);
+
+	if (cellOptions.optionsSource === 'custom' && Array.isArray(cellOptions.customOptions)) {
+		const match = cellOptions.customOptions.find((opt) => String(opt.value) === key);
+		return {
+			label: match?.label ?? displayLabel,
+			color: resolveCustomOptionColor(value, fieldSchema, cellOptions.customOptions)
+		};
+	}
+
+	return {
+		label: displayLabel,
+		color: resolveOptionColor(value, fieldSchema)
+	};
+}
+
+// --- Table cell formatting ---
+
+const ISO_DATE_PATTERN =
+	/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+const NON_DATE_TYPES = new Set([
+	'number',
+	'bigint',
+	'boolean',
+	'options',
+	'array',
+	'jsonarray',
+	'json',
+	'attachment',
+	'attachment_single',
+	'link',
+	'bb_reference',
+	'bb_reference_single'
+]);
+
+export function isDateLikeValue(value: unknown, options: ParseDateOptions = {}): boolean {
+	return parseDateValue(value, options) != null;
+}
+
+export function parseDateValue(value: unknown, options: ParseDateOptions = {}): Date | null {
+	if (value instanceof Date) {
+		return Number.isNaN(value.getTime()) ? null : value;
+	}
+
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		if (!options.allowNumericTimestamps) return null;
+
+		const ms = value > 1_000_000_000_000 ? value : value * 1000;
+		const parsed = new Date(ms);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	if (typeof value === 'string') {
+		const trimmed = value.trim();
+		if (!trimmed || !ISO_DATE_PATTERN.test(trimmed)) return null;
+
+		const parsed = new Date(trimmed);
+		return Number.isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	return null;
+}
+
+function shouldFormatAsDate(type: string, rawValue: unknown): boolean {
+	if (type === 'datetime') {
+		return parseDateValue(rawValue, { allowNumericTimestamps: true }) != null;
+	}
+
+	if (NON_DATE_TYPES.has(type)) return false;
+
+	return isDateLikeValue(rawValue);
+}
+
+/** Matches DatetimeCell.formatDateTime default behaviour. */
+export function formatReadableDate(
+	date: Date,
+	options: { dateFormat?: string; showTime?: boolean; show24HTime?: boolean } = {}
+): string {
+	const { dateFormat, showTime = false, show24HTime = false } = options;
+	let dateResult = '';
+
+	if (!dateFormat || dateFormat === 'default') {
+		dateResult = date.toDateString();
+	} else if (dateFormat === 'MM/DD/YYYY') {
+		dateResult = `${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}/${date.getFullYear()}`;
+	} else if (dateFormat === 'DD/MM/YYYY') {
+		dateResult = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
+	} else if (dateFormat === 'YYYY-MM-DD') {
+		dateResult = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+	} else {
+		const localeOptions: Record<string, Intl.DateTimeFormatOptions> = {
+			'MMM DD, YYYY': { month: 'short', day: 'numeric', year: 'numeric' },
+			'DD MMM YYYY': { day: 'numeric', month: 'short', year: 'numeric' }
+		};
+
+		const formatOption = localeOptions[dateFormat];
+		dateResult = formatOption
+			? date.toLocaleDateString('en-US', formatOption)
+			: date.toDateString();
+	}
+
+	if (!showTime) {
+		return dateResult;
+	}
+
+	const hours = date.getHours();
+	const minutes = date.getMinutes();
+
+	let timeString;
+	if (show24HTime) {
+		timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+	} else {
+		const ampm = hours >= 12 ? 'PM' : 'AM';
+		const display12h = hours % 12 || 12;
+		timeString = `${display12h.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+	}
+
+	return `${dateResult} ${timeString}`;
+}
+
+function formatDateValue(
+	rawValue: unknown,
+	schemaType: string,
+	options: Pick<TableCellFormatOptions, 'dateFormat' | 'showTime' | 'show24HTime'> = {}
+): string {
+	const parsed = parseDateValue(rawValue, {
+		allowNumericTimestamps: schemaType === 'datetime'
+	});
+	if (!parsed) return rawValue == null ? '' : String(rawValue);
+
+	return formatReadableDate(parsed, {
+		dateFormat: options.dateFormat,
+		showTime: options.showTime,
+		show24HTime: options.show24HTime
+	});
+}
+
+function formatTypedValue(rawValue: unknown, schema: SchemaLike): string {
+	if (rawValue == null || rawValue === '') return '';
+
+	const type = schema?.type ?? 'string';
+
+	switch (type) {
+		case 'boolean':
+			return rawValue === true ? 'Yes' : rawValue === false ? 'No' : '';
+		case 'number':
+		case 'bigint':
+			return String(rawValue);
+		case 'array':
+		case 'options':
+		case 'jsonarray':
+			return Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue);
+		case 'json':
+			if (typeof rawValue === 'string') return rawValue;
+			try {
+				return JSON.stringify(rawValue);
+			} catch {
+				return String(rawValue);
+			}
+		case 'attachment':
+		case 'attachment_single': {
+			const items = normalizeTableCellAttachments(rawValue, schema);
+			return items
+				.map((item) => formatAttachmentExtensionLabel(item))
+				.filter(Boolean)
+				.join(', ');
+		}
+		case 'link':
+		case 'bb_reference':
+		case 'bb_reference_single': {
+			if (Array.isArray(rawValue)) {
+				return rawValue
+					.map((item) => item?.primaryDisplay || item?.label || '')
+					.filter(Boolean)
+					.join(', ');
+			}
+			if (typeof rawValue === 'object' && rawValue !== null) {
+				const record = rawValue as { primaryDisplay?: string; label?: string };
+				return record.primaryDisplay || record.label || '';
+			}
+			return String(rawValue);
+		}
+		default:
+			return String(rawValue);
+	}
+}
+
+export function formatTableCellValue(
+	rawValue: unknown,
+	schema?: SchemaLike,
+	options: TableCellFormatOptions = {}
+): string {
+	if (rawValue == null || rawValue === '') return '';
+
+	const type = schema?.type ?? 'string';
+	const isDate = shouldFormatAsDate(type, rawValue);
+	const formattedDate = isDate ? formatDateValue(rawValue, type, options) : null;
+
+	if (options.template && options.processTemplate) {
+		const result = options.processTemplate(options.template, {
+			value: formattedDate ?? rawValue,
+			rawValue
+		});
+
+		if (typeof result === 'string' && shouldFormatAsDate(type, result)) {
+			return formatDateValue(result, type, options);
+		}
+
+		return result == null ? '' : String(result);
+	}
+
+	if (isDate) {
+		return formattedDate ?? '';
+	}
+
+	return formatTypedValue(rawValue, schema);
+}
+
+// --- Phosphor icons ---
 export const ICON_CATEGORIES = {
 	all: 'All Icons',
 	business: 'Business',
@@ -1645,4 +2207,34 @@ export const ICONS_BY_CATEGORY = {
 	weather: ['sun', 'sun-fill', 'cloud', 'cloud-fill', 'rain', 'rain-fill', 'snow', 'snow-fill']
 };
 
-export const ALL_ICONS = ICONS_BY_CATEGORY.all;
+// --- Popup entry (control icon vs focus) ---
+
+let controlIconGesture = false;
+let openOnEnter = false;
+
+/** Mark an in-progress control-icon press so focusin does not auto-open the popup. */
+export function beginControlIconGesture(): void {
+	controlIconGesture = true;
+}
+
+export function endControlIconGesture(): void {
+	controlIconGesture = false;
+}
+
+/** Popup should open when entering edit via focus/tab/body click (not control icon). */
+export function requestOpenOnEnter(): void {
+	if (!controlIconGesture) {
+		openOnEnter = true;
+	}
+}
+
+/** Popup should open when entering edit via the control icon. */
+export function requestIconOpenOnEnter(): void {
+	openOnEnter = true;
+}
+
+export function consumeOpenOnEnter(): boolean {
+	const shouldOpen = openOnEnter;
+	openOnEnter = false;
+	return shouldOpen;
+}

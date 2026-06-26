@@ -1,21 +1,22 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './helpers';
+	import { isTableCellRole, resolveEmptyViewText, shouldShowCellViewChrome } from './helpers';
+
 	import { tooltip } from '../../actions/tooltip';
 	import NumberStepper from './NumberStepper.svelte';
+	import { flexAlignToCellAlign } from '../../utils/columnAlign.ts';
 
 	const dispatch = createEventDispatcher();
-	const { processStringSync } = getContext('sdk');
-	const context = getContext('context');
 
 	let {
 		id,
 		value,
+		displayValue = undefined,
 		cellOptions = {
 			role: 'form',
-			initialState: 'view',
 			debounce: false
 		},
 		autofocus = false,
@@ -23,13 +24,19 @@
 	} = $props();
 
 	let timer = $state();
-	let localValue = $derived(value);
 	let editText = $state('');
+
+	function normalizeStoredValue(val) {
+		if (val == null || val === '') return null;
+		const num = Number(val);
+		return Number.isNaN(num) ? null : num;
+	}
+
+	let localValue = $state();
 
 	let errors = $state([]);
 	let editor = $state();
 	let config = $derived(cellOptions ?? {});
-	let initialState = $derived(config.initialState || 'view');
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let calculated = $derived(config.calculated);
@@ -38,35 +45,35 @@
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
-	let debounceDelay = $derived(config.debounce);
+	let debounceMs = $derived(config.debounce ?? null);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let align = $derived(config.align ?? 'right');
+	let textAlign = $derived(
+		config.align != null && String(config.align).trim() !== ''
+			? flexAlignToCellAlign(config.align)
+			: 'right'
+	);
 	let placeholder = $derived(config.placeholder);
-	let template = $derived(config.template);
 	let decimals = $derived(config.decimals ?? 0);
 	let thousandsSeparator = $derived(config.thousandsSeparator ?? ',');
-	let showStepper = $derived(config.showStepper ?? true);
+	let showStepper = $derived(config.showStepper ?? !isTableCellRole(config.role));
 	let stepValue = $derived(config.stepSize ?? config.step ?? 1);
 	let min = $derived(config.min);
 	let max = $derived(config.max);
-	let clearValueEnabled = $derived(config.clearValue === true && config.role !== 'inline');
+	let clearValueEnabled = $derived(
+		config.clearValue === true && !isTableCellRole(config.role)
+	);
 
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(value !== localValue);
+	let dirty = $derived(config.dirty);
 	let inEdit = $derived($csm === 'editing');
-	let displayValue = $derived(inEdit ? localValue : (value ?? null));
-
+	let isDirty = $derived(
+		inEdit && normalizeStoredValue(value) !== normalizeStoredValue(localValue)
+	);
 	let formattedValue = $derived.by(() => {
-		const formatted = formatNumber(displayValue, thousandsSeparator, decimals);
-		if (template) {
-			return processStringSync(template, {
-				...$context,
-				value: formatted
-			});
-		}
-		return formatted;
+		if (typeof displayValue === 'string') return displayValue;
+		return formatNumber(value, thousandsSeparator, decimals);
 	});
 
 	let isEmpty = $derived(formattedValue === '' || formattedValue == null);
@@ -132,12 +139,14 @@
 		'*': {
 			goTo(state) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
-			_enter() {},
-			click() {
-				return this.focus();
+			_enter() {
+				localValue = normalizeStoredValue(value);
 			},
 			focus() {
 				if (!readonly && !disabled && !calculated) {
@@ -147,40 +156,38 @@
 
 			reset(newValue) {
 				if (newValue == localValue) return;
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
+				localValue = normalizeStoredValue(value);
 				errors = [];
-				return initialState;
+				return 'view';
 			}
 		},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, formattedValue || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
 		justCopied: deferJustCopied(() => csm),
 		readonly: {
 			_enter() {
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
+				localValue = normalizeStoredValue(value);
 			},
 			focus() {}
 		},
 		disabled: {
 			_enter() {
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
+				localValue = normalizeStoredValue(value);
 			},
 			focus() {}
 		},
 		editing: {
 			_enter() {
+				localValue = normalizeStoredValue(value);
 				syncEditTextFromValue();
 				dispatch('enteredit');
 				setTimeout(() => {
@@ -202,27 +209,28 @@
 				this.submit();
 			},
 			submit() {
+				clearTimeout(timer);
 				const next = parseEditableValue(editText);
 				localValue = next;
-				if (value != next) {
+				if (isDirty) {
 					dispatch('change', next == null ? null : Number(next));
 				}
-				return initialState;
+				return 'view';
 			},
 			cancel() {
-				const num = Number(value);
-				localValue = isNaN(num) ? null : num;
+				clearTimeout(timer);
+				localValue = normalizeStoredValue(value);
 				syncEditTextFromValue();
 				dispatch('cancel');
-				return initialState;
+				return 'view';
 			},
-			debouncedDispatch() {
-				if (debounceDelay) {
-					clearTimeout(timer);
-					timer = setTimeout(() => {
-						dispatch('change', localValue == null ? null : Number(localValue));
-					}, debounceDelay);
-				}
+			change() {
+				if (!debounceMs) return;
+
+				clearTimeout(timer);
+				timer = setTimeout(() => {
+					dispatch('change', localValue == null ? null : Number(localValue));
+				}, debounceMs);
 			},
 			keydown(e) {
 				const input = e.target;
@@ -291,7 +299,7 @@
 				}
 
 				if (isCompleteEditText(newValue)) {
-					this.debouncedDispatch();
+					this.change();
 				}
 			},
 			increment(e) {
@@ -299,14 +307,14 @@
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base + stepValue * multiplier).toFixed(decimals ?? 0)));
 				syncEditTextFromValue();
-				this.debouncedDispatch();
+				this.change();
 			},
 			decrement(e) {
 				const multiplier = e?.shiftKey ? 10 : 1;
 				const base = localValue == null ? 0 : Number(localValue);
 				localValue = clampValue(Number((base - stepValue * multiplier).toFixed(decimals ?? 0)));
 				syncEditTextFromValue();
-				this.debouncedDispatch();
+				this.change();
 			},
 			handleWheel(e) {
 				e.preventDefault();
@@ -335,13 +343,19 @@
 	});
 
 	$effect(() => {
+		if (!inEdit) {
+			localValue = normalizeStoredValue(value);
+		}
+	});
+
+	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && value != null && value !== '') {
+		} else if (readonly && copyable && value) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else {
+		} else if (!inEdit) {
 			csm.goTo('view');
 		}
 
@@ -354,13 +368,14 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
-	role={config.role}
+	role={config.role ?? 'form'}
 	{csm}
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	{clearable}
 	{error}
 	{copyIcon}
+	align={textAlign}
 	{color}
 	{background}
 	{buttons}
@@ -371,7 +386,7 @@
 				bind:this={editor}
 				class="editor"
 				class:placeholder={!localValue}
-				style:text-align={align}
+				style:text-align={textAlign}
 				{tabindex}
 				value={editText}
 				{placeholder}
@@ -387,18 +402,25 @@
 				/>
 			{/if}
 		{:else}
-			<span class="value" class:placeholder={isEmpty}>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="value-content" use:tooltip style:text-align={align} on:click={csm.click}>
-					{isEmpty ? placeholder : formattedValue}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="value-contents"
+				class:placeholder={isEmpty && shouldShowCellViewChrome(config.role, inEdit)}
+				use:tooltip
+				style:text-align={textAlign}
+				on:click={() => anchor?.focus()}
+			>
+				<div class="value">
+					{isEmpty ? resolveEmptyViewText(placeholder, config.role, inEdit) : formattedValue}
 				</div>
-			</span>
+			</div>
 		{/if}
 	{/key}
 </BaseCell>
 
 <style>
-	span.value {
+	.value-contents {
+		font-size: 13px;
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
@@ -410,24 +432,20 @@
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
 		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		padding: var(--super-cell-padding);
 	}
 
-	.value-content {
-		min-width: 0;
-		flex: 1;
-		font-style: inherit;
-		font-size: 13px;
-		text-overflow: ellipsis;
-		overflow: hidden;
-		white-space: nowrap;
-	}
-
-	.value.placeholder .value-content {
+	.value-contents.placeholder {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
+	}
+
+	.value {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-style: inherit;
 	}
 </style>

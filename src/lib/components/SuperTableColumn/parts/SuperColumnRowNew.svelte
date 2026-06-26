@@ -1,22 +1,25 @@
-<svelte:options runes={false} />
-
 <script>
-  import { getContext } from "svelte";
-  import StringCell from "../../cells/StringCell.svelte";
-  const columnSettings = getContext("stColumnOptions");
-  const rowCellOptions = getContext("stRowCellOptions");
-  const stbState = getContext("stbState");
-  const stbSettings = getContext("stbSettings");
+  import { getCellComponent } from "../../../utils/cellComponentMap.ts";
 
-  export let row = {};
-  export let isFirst;
-  export let isLast;
-  export let color;
+  let {
+    row = {},
+    isFirstInsertable = false,
+    isLast,
+    color,
+    columnSettings,
+    stbState,
+  } = $props();
 
-  $: cellComponent = $columnSettings.cellComponent ?? StringCell;
-
-  // Reactive: Use errors from the row prop
-  $: fieldError = row.errors && row.errors[$columnSettings.name];
+  let CellComponent = $derived(
+    getCellComponent(
+      columnSettings.schema,
+      Boolean(columnSettings.canEdit && columnSettings.canInsert),
+      true,
+    ),
+  );
+  let fieldError = $derived(
+    row.errors && row.errors[columnSettings.name],
+  );
 </script>
 
 <div
@@ -25,23 +28,22 @@
   style:color
   class:isLast
 >
-  <svelte:component
-    this={cellComponent}
+  <CellComponent
     cellOptions={{
-      ...$rowCellOptions,
+      ...columnSettings.cellOptions,
       readonly: false,
       error: fieldError,
       showDirty: false,
     }}
-    autofocus={isFirst}
-    fieldSchema={$columnSettings.schema}
-    value={row[$columnSettings.name]}
-    multi={$columnSettings.schema.type == "array"}
+    autofocus={isFirstInsertable}
+    fieldSchema={columnSettings.schema}
+    tableid={columnSettings.tableId}
+    value={row[columnSettings.name]}
+    multi={columnSettings.schema.type == "array"}
     on:change={(e) => {
-      stbState.setValue($columnSettings.name, e.detail);
+      stbState.setValue(columnSettings.name, e.detail);
     }}
   />
-  <!-- Add error display similar to plain row's info block -->
   {#if fieldError}
     <div class="info" class:bottom={true}>{fieldError}</div>
   {/if}

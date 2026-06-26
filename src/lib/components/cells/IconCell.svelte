@@ -3,9 +3,15 @@
 	import fsm from 'svelte-fsm';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		consumeOpenOnEnter,
+		copyAndTransition,
+		deferJustCopied,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter
+	} from './helpers';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
-	import { ICON_CATEGORIES, ICONS_BY_CATEGORY } from './phosphorIcons';
+	import { ICON_CATEGORIES, ICONS_BY_CATEGORY } from './helpers';
 
 	const dispatch = createEventDispatcher();
 
@@ -16,7 +22,6 @@
 	let open = $state(false);
 	let searchQuery = $state('');
 	let selectedCategory = $state('all');
-	let originalValue = $state();
 	let localValue = $state();
 
 	let config = $derived(cellOptions ?? {});
@@ -31,16 +36,14 @@
 	let showCategories = $derived(config.showCategories);
 
 	let inEdit = $derived($csm === 'editing');
-	let inline = $derived(config.role === 'inline');
 	let error = $derived(optionError);
 	let icon = $derived.by(() => {
 		const raw = config.icon;
 		if (!raw) return undefined;
 		return raw.replace(/^ph ph-/, '').replace(/^ph-/, '');
 	});
-	let isDirty = $derived(inEdit && localValue !== originalValue);
-
-	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
+	let dirty = $derived(config.dirty);
+	let isDirty = $derived(inEdit && localValue !== value);
 
 	let categories = $derived(
 		Object.entries(ICON_CATEGORIES).map(([categoryId, label]) => ({
@@ -113,25 +116,37 @@
 		'*': {
 			goTo(state) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {
 				localValue = value;
 			},
 			focus() {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					requestOpenOnEnter();
+					return 'editing';
+				}
+			},
+			toggle() {
+				if (!readonly && !disabled) {
+					requestIconOpenOnEnter();
+					return 'editing';
+				}
 			}
 		},
 		readonly: {},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, String(localValue ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -139,11 +154,17 @@
 		disabled: {},
 		editing: {
 			_enter() {
-				originalValue = localValue;
+				localValue = value;
 				searchQuery = '';
 				selectedCategory = 'all';
-				open = true;
+				open = consumeOpenOnEnter();
 				dispatch('enteredit');
+			},
+			toggle() {
+				open = !open;
+			},
+			click() {
+				this.toggle();
 			},
 			_exit() {
 				open = false;
@@ -153,7 +174,7 @@
 				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
-					open = !open;
+					this.toggle();
 				}
 
 				if (e.key === 'Escape') {
@@ -186,13 +207,21 @@
 				}
 			},
 			submit() {
-				dispatch('change', localValue);
+				if (isDirty) {
+					dispatch('change', localValue);
+				}
 				return 'view';
 			},
 			cancel() {
-				localValue = originalValue;
+				localValue = value;
 				return 'view';
 			}
+		}
+	});
+
+	$effect(() => {
+		if (!inEdit) {
+			localValue = value;
 		}
 	});
 
@@ -212,11 +241,11 @@
 <!-- svelte-ignore event_directive_deprecated -->
 <BaseCell
 	{id}
-	role={baseRole}
+	role={config.role ?? 'form'}
 	{csm}
 	bind:anchor
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	clearable={false}
 	naked={true}
 	{error}
@@ -224,6 +253,7 @@
 	{color}
 	{background}
 	popupOpen={open}
+	controlIcon={'ph ph-caret-down'}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
 	{#key localValue}
@@ -423,7 +453,8 @@
 		transition: border-color 0.2s ease;
 	}
 
-	.search-input:focus {
+	.search-input:focus,
+	.search-input:focus-visible {
 		outline: none;
 	}
 
@@ -520,7 +551,8 @@
 		opacity: 1;
 	}
 
-	.icon-button:focus {
+	.icon-button:focus,
+	.icon-button:focus-visible {
 		outline: none;
 	}
 

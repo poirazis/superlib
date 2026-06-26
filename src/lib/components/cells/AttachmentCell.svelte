@@ -2,19 +2,19 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
+	import { tooltip } from '../../actions/tooltip';
 	import {
 		attachmentCopyText,
-		isMultiAttachment,
-		mapCellRole,
-		normalizeAttachments,
-		uploadAttachments,
-		type AttachmentItem
-	} from './attachmentUtils.js';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard.js';
+		copyAndTransition,
+		deferJustCopied,
+		normalizeSingleAttachment,
+		resolveEmptyViewText,
+		uploadAttachments
+	} from './helpers.js';
+	import type { AttachmentItem } from './types.js';
 
 	const dispatch = createEventDispatcher<{
-		change: AttachmentItem[];
+		change: AttachmentItem | null;
 		enteredit: void;
 		exitedit: void;
 		focusout: void;
@@ -24,26 +24,15 @@
 		API?: { uploadAttachment: (tableId: string, data: FormData) => Promise<AttachmentItem[]> };
 	}>('sdk');
 
-	let {
-		id,
-		value,
-		cellOptions = {},
-		fieldSchema,
-		tableid,
-		API = sdk?.API,
-		autofocus = false
-	} = $props();
+	let { id, value, cellOptions = {}, tableid, API = sdk?.API, autofocus = false } = $props();
 
-	let anchor = $state<HTMLElement | null>(null);
-	let popup = $state<HTMLElement | null>(null);
-	let open = $state(false);
-	let focusedOptionIdx = $state<number | undefined>();
 	let fileInput = $state<HTMLInputElement | undefined>();
-	let originalValue = $state<AttachmentItem[] | AttachmentItem | null | undefined>();
-	let localvalue = $state<AttachmentItem[]>([]);
+	let localAttachment = $state<AttachmentItem | null>(null);
+	let hasUserEdit = $state(false);
+
+	let tabindex = $state(0);
 
 	let config = $derived(cellOptions ?? {});
-	let multi = $derived(isMultiAttachment(fieldSchema));
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let placeholder = $derived(config.placeholder ?? '');
@@ -54,18 +43,25 @@
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let baseRole = $derived(mapCellRole(config.role));
-
+	let baseRole = $derived(config.role ?? 'form');
+	let selectFileText = $derived('Upload file...');
 
 	let error = $derived(optionError);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
+	let dirty = $derived(config.dirty);
+	let inEdit = $derived($csm === 'editing');
+	let propAttachment = $derived(normalizeSingleAttachment(value)[0] ?? null);
 	let isDirty = $derived(
-		JSON.stringify(localvalue) !== JSON.stringify(normalizeAttachments(value, multi))
+		hasUserEdit && JSON.stringify(localAttachment) !== JSON.stringify(propAttachment)
 	);
-	let showPlaceholder = $derived(localvalue.length < 1);
+	let attachment = $derived(isDirty && inEdit ? localAttachment : propAttachment);
+	let isEmpty = $derived(attachment == null);
 
-	const emitChange = (nextValue: AttachmentItem[]) => {
-		localvalue = nextValue;
+	let anchor = $state<HTMLElement | null>(null);
+
+	const emitChange = (nextValue: AttachmentItem | null) => {
+		hasUserEdit = true;
+		localAttachment = nextValue;
 		dispatch('change', nextValue);
 	};
 
@@ -73,7 +69,7 @@
 		if (!API || !tableid) return [];
 		try {
 			const res = await uploadAttachments(API, tableid, fileList);
-			emitChange([...localvalue, ...res]);
+			emitChange(res[0] ?? null);
 			return res;
 		} catch (error) {
 			console.error('Upload failed:', error);
@@ -81,17 +77,22 @@
 		}
 	};
 
-	const handleFileSelect = (event: Event) => {
+	const handleFileSelect = async (event: Event) => {
 		const target = event.target as HTMLInputElement;
 		const files = Array.from(target.files || []);
-		processFiles(files);
+		await processFiles(files);
 		target.value = '';
+		anchor?.focus();
 	};
 
-	const handleDelete = (key: number) => {
-		const next = [...localvalue];
-		next.splice(key, 1);
-		emitChange(next);
+	const handleDelete = () => {
+		emitChange(null);
+	};
+
+	const triggerFileSelect = (event: Event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		fileInput?.click();
 	};
 
 	const csm = fsm('view', {
@@ -101,126 +102,84 @@
 			}
 		},
 		view: {
-			_enter() {
-				open = false;
-			},
 			focus() {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					return 'editing';
+				}
 			}
 		},
-		readonly: {
-			_enter() {
-				open = false;
-			}
-		},
+		readonly: {},
 		copyable: {
-			_enter() {
-				open = false;
-			},
-			click() {
-				copyAndTransition(() => csm, attachmentCopyText(localvalue));
+			copy() {
+				copyAndTransition(() => csm, attachmentCopyText(propAttachment ? [propAttachment] : []));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
 		justCopied: deferJustCopied(() => csm),
-		disabled: {
-			_enter() {
-				open = false;
-			}
-		},
+		disabled: {},
 		editing: {
 			_enter() {
-				originalValue = value;
-				localvalue = normalizeAttachments(value, multi);
-				open = false;
+				localAttachment = propAttachment;
 				dispatch('enteredit');
 			},
 			_exit() {
-				open = false;
 				dispatch('exitedit');
 			},
-			click() {
-				open = !open;
-			},
-			keydown(e) {
-				if (e.key === ' ' || e.key === 'Enter') {
-					e.preventDefault();
-					this.click();
-				}
-
-				if (e.key === 'Escape') {
-					this.cancel();
-				}
-			},
-			exitPopup() {
-				if (
-					JSON.stringify(localvalue) !==
-					JSON.stringify(normalizeAttachments(originalValue, multi))
-				) {
-					dispatch('change', localvalue);
+			exitEdit() {
+				if (isDirty) {
+					dispatch('change', localAttachment);
 				}
 				dispatch('focusout');
-				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+				return 'view';
 			},
-			focusout(e: FocusEvent) {
-				const related = e.relatedTarget as Node | null;
-				if (popup?.contains(related)) return;
-				return this.exitPopup();
-			},
-			popupFocusout(e: FocusEvent) {
-				if (anchor?.contains(e.relatedTarget as Node)) return;
-				return this.exitPopup();
-			},
-			popupKeydown(e: KeyboardEvent) {
-				if (e.key === 'Tab') {
-					e.preventDefault();
-					anchor?.focus();
-					return this.exitPopup();
-				}
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					return this.cancel();
-				}
+			focusout(e) {
+				let related = e.relatedTarget as Node | null;
+				if (related && related == fileInput) return;
+				if (anchor?.contains(related)) return;
+
+				return 'view';
 			},
 			cancel() {
-				localvalue = normalizeAttachments(originalValue, multi);
-				open = false;
-				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+				hasUserEdit = false;
+				localAttachment = propAttachment;
+				return 'view';
 			}
 		}
 	});
 
-	let inEdit = $derived($csm === 'editing');
-
 	$effect(() => {
-		localvalue = normalizeAttachments(value, multi);
+		const next = propAttachment;
+		if (!hasUserEdit) {
+			localAttachment = next;
+			return;
+		}
+		if (JSON.stringify(next) === JSON.stringify(localAttachment)) {
+			hasUserEdit = false;
+		}
 	});
 
 	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && localvalue.length) {
+		} else if (readonly && copyable && propAttachment) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if (baseRole === 'inline') {
-			csm.goTo('view');
 		} else {
-			csm.goTo('editing');
+			csm.goTo('view');
 		}
+
+		tabindex = readonly || disabled ? -1 : 0;
 	});
 
 	$effect(() => {
 		if (autofocus) {
-			setTimeout(() => {
-				csm.focus();
-				csm.click?.();
-			}, 30);
+			setTimeout(() => csm.focus(), 30);
 		}
 	});
 </script>
@@ -228,152 +187,132 @@
 <!-- svelte-ignore event_directive_deprecated -->
 <BaseCell
 	{id}
+	bind:anchor
 	role={baseRole}
 	{csm}
-	bind:anchor
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	clearable={false}
 	{error}
 	{copyIcon}
 	{color}
 	{background}
-	popupOpen={open}
-	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
+	{tabindex}
 >
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="attachment-display" class:placeholder={showPlaceholder}>
-		{#if localvalue.length || inEdit}
-			<div class="items">
-				{#each localvalue.slice(0, 5) as file}
-					{#if file}
-						<div class="item pill">
-							<span>{file?.extension?.toUpperCase()}</span>
+	<div class="value-contents" class:placeholder={isEmpty} use:tooltip>
+		{#key $csm}
+			{#key isEmpty}
+				<div class="value">
+					{#if isEmpty}
+						{#if inEdit && !readonly && !disabled}
+							<!-- svelte-ignore event_directive_deprecated -->
+							<button
+								class="select-link"
+								type="button"
+								on:click={triggerFileSelect}
+								aria-label={selectFileText}
+							>
+								{selectFileText}
+							</button>
+						{:else}
+							{resolveEmptyViewText(placeholder, baseRole, inEdit)}
+						{/if}
+					{:else if inEdit}
+						<div class="inline-attachment">
+							<div class="pill">{attachment.extension?.toUpperCase()}</div>
+							<!-- svelte-ignore event_directive_deprecated -->
+							<a href={attachment.url} class="filename" download on:click|stopPropagation>
+								{attachment.name}
+							</a>
+							{#if !readonly}
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button
+									class="btn-delete-inline"
+									on:click|stopPropagation={handleDelete}
+									tabindex="-1"
+									aria-label="Delete"
+									title="Delete"
+									type="button"
+								>
+									<i class="ph ph-trash-simple"></i>
+								</button>
+							{/if}
+						</div>
+					{:else}
+						<div class="items">
+							<div class="item pill">
+								<span>{attachment.extension?.toUpperCase()}</span>
+							</div>
+							<span class="filename-view">{attachment.name}</span>
 						</div>
 					{/if}
-				{/each}
-				{#if localvalue.length > 5}
-					<span class="remaining-count">( + {localvalue.length - 5} )</span>
-				{/if}
-			</div>
-		{:else}
-			<span>{placeholder}</span>
-		{/if}
-
-		{#if !readonly && !disabled && baseRole !== 'inline'}
-			<i class="ph ph-caret-down action-icon"></i>
-		{/if}
+				</div>
+			{/key}
+		{/key}
 	</div>
 </BaseCell>
 
-{#if inEdit}
+{#if inEdit && !readonly && !disabled}
 	<!-- svelte-ignore event_directive_deprecated -->
-	<SuperPopover
-		{anchor}
-		align="right"
-		{open}
-		maxHeight={350}
-		useAnchorWidth
-		dismissible={false}
-	>
-		{#snippet children()}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<!-- svelte-ignore event_directive_deprecated -->
-			<div
-				class="popup"
-				bind:this={popup}
-				on:focusout={csm.popupFocusout}
-				on:keydown={csm.popupKeydown}
-			>
-			<div class="attachments">
-		{#if localvalue?.length}
-			{#each localvalue as attachment, idx (idx)}
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore event_directive_deprecated -->
-				<div
-					class="attachment"
-					class:focused={focusedOptionIdx === idx}
-					on:mouseenter={() => (focusedOptionIdx = idx)}
-				>
-					<!-- svelte-ignore event_directive_deprecated -->
-					<button
-						class="btn-delete"
-						on:click={() => handleDelete(idx)}
-						tabindex="-1"
-						aria-label="Delete"
-						title="Delete"
-						type="button"
-					>
-						<i class="ph ph-download-simple"></i>
-					</button>
-					<div class="pill">{attachment.extension?.toUpperCase()}</div>
-					<a href={attachment.url} class="filename" download>{attachment.name}</a>
-					{#if !readonly}
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button
-							class="btn-delete"
-							on:click={() => handleDelete(idx)}
-							tabindex="-1"
-							aria-label="Delete"
-							title="Delete"
-							type="button"
-						>
-							<i class="ph ph-trash-simple"></i>
-						</button>
-					{/if}
-				</div>
-			{/each}
-		{/if}
-
-		<!-- svelte-ignore event_directive_deprecated -->
-		<button
-			class="btn-upload-empty"
-			on:click={() => fileInput?.click()}
-			aria-label="Upload attachment"
-			type="button"
-			disabled={disabled || readonly}
-		>
-			<i class="ph ph-plus"></i> Add Attachment
-		</button>
-
-		<!-- svelte-ignore event_directive_deprecated -->
-		<input
-			bind:this={fileInput}
-			type="file"
-			multiple={multi}
-			style="display: none;"
-			on:change={handleFileSelect}
-		/>
-			</div>
-			</div>
-		{/snippet}
-	</SuperPopover>
+	<input bind:this={fileInput} type="file" style="display: none;" on:change={handleFileSelect} />
 {/if}
 
 <style>
-	.popup {
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-	}
-
-	.attachment-display {
+	.value-contents {
+		font-size: 13px;
+		min-width: 0;
+		max-width: 100%;
+		flex: 1 1 auto;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		flex: 1 1 auto;
-		min-width: 0;
 		height: 100%;
-		padding: 0.25rem 0.75rem;
-		box-sizing: border-box;
+		background: transparent;
+		color: inherit;
+		border: none;
+		outline: none;
 		cursor: inherit;
+		overflow: hidden;
+		padding: var(--super-cell-padding);
 	}
 
-	.attachment-display.placeholder {
+	.value-contents.placeholder {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
+	}
+
+	.value {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-style: inherit;
+		min-width: 0;
+	}
+
+	.select-link {
+		background: none;
+		border: none;
+		padding: 0;
+		margin: 0;
+		font: inherit;
 		font-style: italic;
-		color: var(--spectrum-global-color-gray-600);
+		color: var(--spectrum-global-color-blue-700);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.select-link:hover {
+		color: var(--spectrum-global-color-blue-800);
+	}
+
+	.inline-attachment {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+		width: 100%;
 	}
 
 	.items {
@@ -382,6 +321,8 @@
 		gap: 0.25rem;
 		min-width: 0;
 		flex: 1 1 auto;
+		flex-wrap: nowrap;
+		overflow: hidden;
 	}
 
 	.pill {
@@ -394,113 +335,39 @@
 		white-space: nowrap;
 		overflow: hidden;
 		justify-content: center;
+		flex-shrink: 0;
 	}
 
 	a.filename {
-		width: 100%;
 		line-height: 22px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		overflow: hidden;
 		text-decoration: underline;
 		color: var(--spectrum-global-color-blue-700);
-		flex: auto;
+		flex: 1 1 auto;
+		min-width: 0;
 	}
 
-	.action-icon {
-		display: flex;
-		align-items: center;
-		color: var(--spectrum-global-color-gray-600);
-	}
-
-	.action-icon:hover {
-		cursor: pointer;
-		color: var(--spectrum-global-color-static-blue-800);
-	}
-
-	.attachment {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.25rem 0.25rem;
-		cursor: pointer;
-		border-bottom: 1px solid var(--spectrum-global-color-gray-200);
-	}
-
-	.attachment:last-child {
-		border-bottom: none;
-	}
-
-	.attachment:hover {
-		background-color: var(--spectrum-global-color-gray-100);
-	}
-
-	.attachments {
-		display: flex;
-		flex-direction: column;
-		align-items: stretch;
-		flex: auto;
-		position: relative;
-		width: 100%;
-		height: 100%;
-		overflow-y: auto;
-		padding: 0.25rem;
-	}
-
-	.btn-delete {
-		aspect-ratio: 1;
+	.btn-delete-inline {
 		color: var(--spectrum-global-color-gray-500);
 		background: none;
 		border: 1px solid transparent;
 		cursor: pointer;
 		padding: 0.25rem;
 		border-radius: 3px;
-		transition: all 0.2s ease;
+		flex-shrink: 0;
 	}
 
-	.btn-delete:hover {
+	.btn-delete-inline:hover {
 		border-color: var(--spectrum-global-color-red-500);
 		color: var(--spectrum-global-color-red-500);
 	}
 
-	.btn-upload-empty {
-		width: 100%;
-		height: 3rem;
-		background: none;
-		border: 2px dashed var(--spectrum-global-color-gray-400);
-		border-radius: 6px;
-		padding: 1rem 2rem;
-		cursor: pointer;
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		gap: 0.5rem;
-		transition: all 0.2s ease;
-		color: var(--spectrum-global-color-gray-600);
-		font-size: 14px;
-		justify-content: center;
-		margin-top: 1rem;
-	}
-
-	.btn-upload-empty:hover:not(:disabled) {
-		border-color: var(--spectrum-global-color-blue-500);
-		color: var(--spectrum-global-color-blue-500);
-		background-color: var(--spectrum-global-color-blue-50);
-	}
-
-	.btn-upload-empty:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.remaining-count {
-		height: 100%;
-		display: flex;
-		align-items: center;
-		color: var(--spectrum-global-color-gray-700);
-		font-size: 12px;
-		font-weight: 500;
-		margin-left: 0.25rem;
+	.filename-view {
+		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: nowrap;
+		min-width: 0;
 	}
 </style>

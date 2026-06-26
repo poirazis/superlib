@@ -105,6 +105,7 @@
 			}}
 			on:keydown={handleEscape}
 			on:focusout={onFocusout}
+			on:anchorlost={hide}
 			class={'spectrum-Popover is-open ' + (className ?? '')}
 			class:customZindex
 			class:hide-popover={open && !showPopover}

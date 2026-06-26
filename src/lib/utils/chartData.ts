@@ -4,27 +4,46 @@ export type CarbonChartRow = {
 	value: number;
 };
 
+export function normalizeValueColumns(
+	valueColumn: string | string[] | null | undefined
+): string[] {
+	if (!valueColumn) return [];
+	if (Array.isArray(valueColumn)) {
+		return valueColumn.map((col) => String(col).trim()).filter(Boolean);
+	}
+	if (typeof valueColumn === 'string') {
+		const trimmed = valueColumn.trim();
+		return trimmed ? [trimmed] : [];
+	}
+	return [];
+}
+
 export function mapRowsToCarbonData(
 	rows: Record<string, unknown>[] | undefined,
 	chartType: string,
 	labelColumn: string,
-	valueColumn: string[],
+	valueColumn: string | string[] | null | undefined,
 ): CarbonChartRow[] {
-	if (!labelColumn || !valueColumn?.length || !rows?.length) return [];
+	const valueColumns = normalizeValueColumns(valueColumn);
+	if (!labelColumn || !valueColumns.length || !rows?.length) return [];
 
 	const mappedData: CarbonChartRow[] = [];
 
 	for (const row of rows) {
 		const label = String(row[labelColumn]);
 
-		if (chartType === 'pieChart' || chartType === 'donutChart') {
+		if (
+			chartType === 'pieChart' ||
+			chartType === 'donutChart' ||
+			chartType === 'meterChart'
+		) {
 			mappedData.push({
 				group: label,
 				label,
-				value: Number(row[valueColumn[0]]) || 0
+				value: Number(row[valueColumns[0]]) || 0
 			});
 		} else {
-			for (const col of valueColumn) {
+			for (const col of valueColumns) {
 				mappedData.push({
 					group: col,
 					label,

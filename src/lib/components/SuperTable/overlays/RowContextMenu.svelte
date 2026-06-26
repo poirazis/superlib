@@ -1,51 +1,43 @@
-<svelte:options runes={false} />
-
 <script>
-  import { getContext } from "svelte";
   import SuperPopover from "../../SuperPopover/SuperPopover.svelte";
-  import SuperButton from "../../Button.svelte";
+  import SuperButton from "../../buttons/SuperButton.svelte";
+  import { configuredButtonKey } from "../../../utils/buttonConditions.ts";
 
-  const stbAPI = getContext("stbAPI");
-  const stbMenuID = getContext("stbMenuID");
-  const stbMenuAnchor = getContext("stbMenuAnchor");
+  let {
+    rowContextMenuItems,
+    right = true,
+    row,
+    tableAPI,
+    rowState,
+  } = $props();
 
-  export let rowContextMenuItems;
-  export let right = true;
-  export let row;
+  let isOpen = $derived(rowState.menuAnchor != -1);
+  let buttons = $derived(tableAPI.resolveRowButtons(rowContextMenuItems, row));
 
-  $: isOpen = $stbMenuAnchor != -1;
-  $: buttons = rowContextMenuItems?.filter(({ conditions }) =>
-    stbAPI.shouldShowButton(conditions || [], stbAPI.enrichContext(row))
-  );
+  function closeMenu() {
+    rowState.menuRow = -1;
+    rowState.menuAnchor = -1;
+  }
 </script>
-
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<!-- svelte-ignore a11y-click-events-have-key-events -->
 
 {#if isOpen && buttons?.length}
   <SuperPopover
     open
-    anchor={$stbMenuAnchor}
+    anchor={rowState.menuAnchor}
     align={right ? "right" : "left"}
     ignoreAnchor={false}
-    on:close={() => {
-      $stbMenuID = -1;
-      $stbMenuAnchor = -1;
-    }}
+    on:close={closeMenu}
   >
     <div class="action-menu">
-      {#each buttons as { text, icon, disabled, onClick, size, type, conditions }}
+      {#each buttons as button, index (configuredButtonKey(button, index))}
         <SuperButton
-          {size}
-          {type}
-          {icon}
-          {text}
-          {disabled}
+          {...button}
           quiet={true}
           menuItem
           menuAlign={right ? "right" : "left"}
           onClick={() => {
-            stbAPI.executeRowContextMenuAction($stbMenuID, onClick);
+            button.onClick?.();
+            closeMenu();
           }}
         />
       {/each}

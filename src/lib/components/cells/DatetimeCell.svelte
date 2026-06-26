@@ -1,23 +1,36 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext, untrack } from 'svelte';
+	import { createEventDispatcher, untrack } from 'svelte';
 	import { DatePicker } from 'date-picker-svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './helpers';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
+	import {
+		consumeOpenOnEnter,
+		emittedFieldValuesEqual,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter,
+		resolveEmptyViewText,
+		shouldShowCellViewChrome
+	} from './helpers';
+	import { tooltip } from '$lib/actions/tooltip.ts';
 
 	const dispatch = createEventDispatcher();
-	const { processStringSync } = getContext('sdk');
 
-	let { id, value, cellOptions = {}, autofocus = false, buttons = [] } = $props();
+	let {
+		id,
+		value,
+		displayValue = undefined,
+		cellOptions = {},
+		autofocus = false,
+		buttons = []
+	} = $props();
 
 	let anchor = $state(null);
 	let popup = $state<HTMLElement | null>(null);
 	let timePicker = $state();
 	let dateInput = $state();
 	let open = $state(false);
-	let selection = $state(false);
-	let originalValue = $state();
 	let innerDate = $state(null);
 	let timeValue = $state('');
 	let editText = $state('');
@@ -39,11 +52,14 @@
 	let showDirty = $derived(config.showDirty);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
+	let debounceMs = $derived(config.debounce ?? null);
+	let changeTimer = $state<ReturnType<typeof setTimeout>>();
 
 	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(inEdit && !emittedFieldValuesEqual(buildOutputValue(), value));
 	let error = $derived(optionError);
-	let isDirty = $derived(inEdit && selection);
-	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
+	let dirty = $derived(config.dirty);
+	let baseRole = $derived(config.role ?? 'form');
 
 	const parseValueToDate = (valueStr) => {
 		if (valueStr == null || valueStr === '') return null;
@@ -203,16 +219,23 @@
 		if (trimmed === '') {
 			innerDate = null;
 			timeValue = '';
-			selection = true;
 			return null;
+		}
+
+		// Picker selections keep innerDate in sync with editText; skip re-parsing display
+		// formats (e.g. default toDateString) that parseTypedDate cannot round-trip.
+		if (innerDate) {
+			const formatted = formatDateTime(innerDate, currentDateFormat, currentShowTime);
+			if (formatted === trimmed) {
+				return buildOutputValue();
+			}
 		}
 
 		const parsed = parseTypedDate(trimmed, currentDateFormat);
 		if (!parsed) {
-			innerDate = parseValueToDate(originalValue);
+			innerDate = parseValueToDate(value);
 			syncEditTextFromDate();
 			syncTimeValue();
-			selection = innerDate != null;
 			return undefined;
 		}
 
@@ -230,7 +253,6 @@
 		innerDate = parsed;
 		syncTimeValue();
 		editText = formatDateTime(innerDate, currentDateFormat, currentShowTime);
-		selection = true;
 		return buildOutputValue();
 	};
 
@@ -245,17 +267,13 @@
 
 	let formattedValue = $derived.by(() => {
 		if (!innerDate) return '';
-
-		if (config.template) {
-			return processStringSync(config.template, {
-				value: innerDate
-			});
-		}
-
 		return formatDateTime(innerDate, currentDateFormat, currentShowTime);
 	});
 
+	let viewText = $derived(typeof displayValue === 'string' ? displayValue : formattedValue);
+
 	let inputShowsPlaceholder = $derived(innerDate == null);
+	let showPlaceholder = $derived(!innerDate && shouldShowCellViewChrome(baseRole, inEdit));
 
 	const csm = fsm('view', {
 		'*': {
@@ -266,31 +284,33 @@
 		view: {
 			_enter() {
 				open = false;
-				selection = false;
 			},
-			mousedown() {},
+			toggle() {
+				anchor?.focus();
+			},
 			focus() {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					requestOpenOnEnter();
+					return 'editing';
+				}
 			}
 		},
 		readonly: {
 			_enter() {
 				open = false;
-				selection = false;
 			}
 		},
 		copyable: {
 			_enter() {
 				open = false;
-				selection = false;
 			},
-			click() {
-				copyAndTransition(() => csm, formattedValue || String(value ?? ''));
+			copy() {
+				copyAndTransition(() => csm, viewText || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -298,27 +318,24 @@
 		disabled: {
 			_enter() {
 				open = false;
-				selection = false;
 			}
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
 				innerDate = parseValueToDate(value);
 				syncTimeValue();
 				if (inputDate) {
 					syncEditTextFromDate();
 					dateInput?.focus();
 				}
-				open = true;
+				open = consumeOpenOnEnter();
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			mousedown(e) {
-				e.stopPropagation();
+			toggle() {
 				open = !open;
 			},
 			keydown(e) {
@@ -333,7 +350,7 @@
 				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
-					open = !open;
+					this.toggle();
 				}
 
 				if (e.code === 'Delete' || e.code === 'Backspace') {
@@ -342,64 +359,84 @@
 					innerDate = null;
 					editText = '';
 					timeValue = '';
-					selection = true;
-					dispatch('change', null);
+					csm.change(null);
 				}
 
 				if (e.key === 'Escape') {
-					this.cancel();
+					e.preventDefault();
+					if (open) {
+						open = false;
+						anchor?.focus();
+					} else {
+						this.cancel();
+					}
 				}
-			},
-			exitPopup() {
-				open = false;
-				this.submit();
-				return readonly ? 'readonly' : 'view';
 			},
 			focusout(e) {
 				const related = e.relatedTarget as Node | null;
 				if (popup?.contains(related) || dateInput?.contains(related)) return;
-				return this.exitPopup();
+
+				if (debounceMs && isDirty) {
+					clearTimeout(changeTimer);
+					dispatch('change', buildOutputValue());
+				} else {
+					csm.submit();
+				}
+				return 'view';
 			},
 			popupFocusout(e) {
-				if (anchor?.contains(e.relatedTarget as Node)) return;
-				return this.exitPopup();
+				if (e.relatedTarget === anchor || popup?.contains(e.relatedTarget)) return;
+
+				if (debounceMs && isDirty) {
+					clearTimeout(changeTimer);
+					dispatch('change', buildOutputValue());
+				} else {
+					csm.submit();
+				}
+				return 'view';
 			},
 			popupKeydown(e) {
 				if (e.key === 'Tab') {
 					e.preventDefault();
 					anchor?.focus();
-					return this.exitPopup();
+					return 'view';
 				}
 				if (e.key === 'Escape') {
 					e.preventDefault();
 					if (open) {
 						open = false;
 						anchor?.focus();
-						return;
+					} else {
+						this.cancel();
 					}
-					return this.cancel();
+				}
+			},
+			change(nextValue: unknown) {
+				if (debounceMs) {
+					clearTimeout(changeTimer);
+					changeTimer = setTimeout(() => dispatch('change', nextValue), debounceMs);
 				}
 			},
 			submit() {
+				clearTimeout(changeTimer);
 				if (inputDate) {
-					const committed = commitInputDate();
-					if (committed === null) {
-						dispatch('change', null);
-					} else if (committed !== undefined) {
-						dispatch('change', committed);
-					}
-				} else if (selection) {
+					commitInputDate();
+				}
+				if (isDirty) {
 					dispatch('change', buildOutputValue());
 				}
 			},
 			cancel() {
-				innerDate = parseValueToDate(originalValue);
+				clearTimeout(changeTimer);
+				innerDate = parseValueToDate(value);
 				syncTimeValue();
 				if (inputDate) {
 					syncEditTextFromDate();
 				}
 				open = false;
-				return readonly ? 'readonly' : 'view';
+				dispatch('cancel');
+				anchor?.focus();
+				return 'view';
 			}
 		}
 	});
@@ -417,7 +454,7 @@
 		timeValue = startTime;
 		date.setHours(0, 0, 0, 0);
 		innerDate = new Date(date);
-		selection = true;
+		csm.change(buildOutputValue());
 		anchor?.focus();
 	};
 
@@ -427,24 +464,28 @@
 		timeValue = endTime;
 		date.setHours(23, 59, 0, 0);
 		innerDate = new Date(date);
-		selection = true;
+		csm.change(buildOutputValue());
 		anchor?.focus();
 	};
 
 	const handleNowTime = () => {
 		innerDate = new Date();
 		syncTimeValue();
-		selection = true;
+		csm.change(buildOutputValue());
 		anchor?.focus();
 	};
 
-	const handleClearValue = () => {
-		csm.submit();
+	const handleClearValue = (e) => {
+		e?.stopPropagation?.();
+		innerDate = null;
+		timeValue = '';
+		editText = '';
+		csm.change(null);
+		anchor?.focus();
 	};
 
 	const handleTimeChange = (e) => {
 		if (!currentShowTime || !innerDate) return;
-		selection = true;
 
 		const newTime = e.target.value;
 		const time24h = show24HTime ? newTime : parse12HourTime(newTime);
@@ -453,16 +494,18 @@
 		const [hours, minutes] = time24h.split(':').map(Number);
 		innerDate.setHours(hours, minutes, 0, 0);
 		innerDate = new Date(innerDate);
+
+		csm.change(buildOutputValue());
 	};
 
 	const handleDateInput = (e) => {
-		selection = true;
 		editText = e.target.value;
 
 		const trimmed = editText.trim();
 		if (!trimmed) {
 			innerDate = null;
 			timeValue = '';
+			csm.change(null);
 			return;
 		}
 
@@ -487,11 +530,19 @@
 
 		innerDate = parsed;
 		syncTimeValue();
+
+		if (debounceMs) {
+			const committed = commitInputDate();
+			if (committed === null) {
+				csm.change(null);
+			} else if (committed !== undefined) {
+				csm.change(committed);
+			}
+		}
 	};
 
 	const handleDateChange = (e) => {
 		const newDate = e.detail;
-		selection = true;
 
 		if (currentShowTime && innerDate) {
 			newDate.setHours(
@@ -506,14 +557,29 @@
 		syncTimeValue();
 		if (inputDate) {
 			editText = formatDateTime(innerDate, currentDateFormat, currentShowTime);
-			dateInput?.focus();
-		} else {
-			anchor?.focus();
 		}
-		open = false;
+
+		if (currentShowTime) {
+			timePicker?.focus();
+		} else {
+			if (inputDate) {
+				dateInput?.focus();
+			} else {
+				anchor?.focus();
+			}
+			open = false;
+		}
+
+		csm.change(buildOutputValue());
 	};
 
 	$effect(() => {
+		return () => clearTimeout(changeTimer);
+	});
+
+	$effect(() => {
+		if ($csm === 'editing') return;
+
 		const externalValue = value;
 		untrack(() => {
 			innerDate = parseValueToDate(externalValue);
@@ -539,7 +605,7 @@
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if (!inEdit) {
+		} else {
 			csm.goTo('view');
 		}
 	});
@@ -552,13 +618,14 @@
 	{csm}
 	bind:anchor
 	icon={optionIcon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	clearable={false}
 	{error}
 	{copyIcon}
 	{color}
 	{background}
 	popupOpen={open}
+	controlIcon={'ph ph-calendar-blank'}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 	{buttons}
 >
@@ -575,70 +642,71 @@
 			placeholder={dateInputPlaceholder}
 		/>
 	{:else}
-		<span class="value" class:placeholder={!innerDate}>
-			{formattedValue || placeholder}
-		</span>
-	{/if}
-	{#if $csm === 'editing' || $csm === 'view'}
-		<i class="ph ph-calendar-blank control-icon"></i>
+		<div class="value-contents" class:placeholder={showPlaceholder}>
+			<div class="value" use:tooltip={viewText}>
+				{viewText || resolveEmptyViewText(placeholder, baseRole, inEdit)}
+			</div>
+		</div>
 	{/if}
 </BaseCell>
 
 {#if $csm === 'editing'}
-<SuperPopover
-	{anchor}
-	{open}
-	align="right"
-	maxHeight={400}
-	useAnchorWidth={false}
-	dismissible={false}
->
-	{#snippet children()}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<!-- svelte-ignore event_directive_deprecated -->
-		<div
-			class="popup"
-			bind:this={popup}
-			on:focusout={csm.popupFocusout}
-			on:keydown={csm.popupKeydown}
-		>
-		<div
-			class="datetime-picker-container"
-			style:--date-picker-background="var(--spectrum-global-color-gray-75)"
-			style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
-			style:--date-picker-selected-background="var(--accent-color)"
-		>
+	<SuperPopover
+		{anchor}
+		{open}
+		align="right"
+		maxHeight={400}
+		useAnchorWidth={false}
+		on:close={() => (open = false)}
+	>
+		{#snippet children()}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore event_directive_deprecated -->
-			<DatePicker value={innerDate ?? new Date()} on:select={handleDateChange} />
-
-			{#if currentShowTime}
-				<div class="time-section">
-					<!-- svelte-ignore a11y_label_has_associated_control -->
+			<div
+				class="popup"
+				bind:this={popup}
+				on:focusout={csm.popupFocusout}
+				on:keydown={csm.popupKeydown}
+			>
+				<div
+					class="datetime-picker-container"
+					style:--date-picker-background="var(--spectrum-global-color-gray-75)"
+					style:--date-picker-foreground="var(--spectrum-global-color-gray-800)"
+					style:--date-picker-selected-background="var(--accent-color)"
+				>
 					<!-- svelte-ignore event_directive_deprecated -->
-					<input
-						bind:this={timePicker}
-						type="text"
-						placeholder={show24HTime ? 'HH:MM' : 'HH:MM AM/PM'}
-						bind:value={timeValue}
-						on:change={handleTimeChange}
-						class="time-input"
-					/>
-					<div class="time-buttons">
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button class="time-button start-button" on:click={handleStartTime}>Start</button>
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button class="time-button end-button" on:click={handleEndTime}>End</button>
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button class="time-button now-button" on:click={handleNowTime}>Now</button>
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button class="time-button clear-button" on:click={handleClearValue}>Select</button>
-					</div>
+					<DatePicker value={innerDate ?? new Date()} on:select={handleDateChange} />
+
+					{#if currentShowTime}
+						<div class="time-section">
+							<!-- svelte-ignore a11y_label_has_associated_control -->
+							<!-- svelte-ignore event_directive_deprecated -->
+							<input
+								bind:this={timePicker}
+								type="text"
+								placeholder={show24HTime ? 'HH:MM' : 'HH:MM AM/PM'}
+								bind:value={timeValue}
+								on:change={handleTimeChange}
+								class="time-input"
+							/>
+							<div class="time-buttons">
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button class="time-button start-button" on:click={handleStartTime}>Start</button>
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button class="time-button end-button" on:click={handleEndTime}>End</button>
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button class="time-button now-button" on:click={handleNowTime}>Now</button>
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button class="time-button clear-button" on:click|stopPropagation={handleClearValue}
+									>Clear</button
+								>
+							</div>
+						</div>
+					{/if}
 				</div>
-			{/if}
-		</div>
-		</div>
-	{/snippet}
-</SuperPopover>
+			</div>
+		{/snippet}
+	</SuperPopover>
 {/if}
 
 <style>
@@ -702,14 +770,14 @@
 		color: var(--spectrum-global-color-gray-800);
 	}
 
-	.time-input:focus {
+	.time-input:focus,
+	.time-input:focus-visible {
 		outline: none;
 		border-color: var(--spectrum-global-color-blue-500);
 		box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
 	}
 
-	span.value {
-		font-style: inherit;
+	.value-contents {
 		font-size: 13px;
 		min-width: 0;
 		max-width: 100%;
@@ -722,11 +790,19 @@
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
+		overflow: hidden;
+		padding: var(--super-cell-padding);
 	}
 
-	.value.placeholder {
+	.value-contents.placeholder {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
+	}
+
+	.value {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

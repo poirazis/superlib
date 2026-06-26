@@ -3,7 +3,9 @@
 	import fsm from 'svelte-fsm';
 	import { InputMask, Masked, MaskedPattern, MaskedRegExp, createMask } from 'imask';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './helpers';
+	import { isTableCellRole, shouldShowCellViewChrome } from './helpers';
+
 
 	if (MaskedPattern && Masked.overloads) {
 		if (!Masked.overloads.find((o) => o.mask === MaskedPattern)) {
@@ -19,7 +21,6 @@
 		mask = '',
 		cellOptions = {
 			role: 'form',
-			initialState: 'view',
 			debounce: false,
 			placeholder: ''
 		},
@@ -29,7 +30,6 @@
 
 	let timer = $state();
 	let localValue = $state(null);
-	let originalValue = $state();
 	let lastEdit = $state();
 	let isComplete = $state(false);
 	let inputMask = $state();
@@ -37,7 +37,6 @@
 	let errors = $state([]);
 
 	let config = $derived(cellOptions ?? {});
-	let initialState = $derived(config.initialState || 'view');
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let optionError = $derived(config.error);
@@ -45,7 +44,7 @@
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
-	let debounceDelay = $derived(config.debounce);
+	let debounceMs = $derived(config.debounce ?? null);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 
@@ -106,13 +105,14 @@
 
 	let placeholder = $derived(mask || config.placeholder || field || '');
 	let error = $derived(optionError || errors.length > 0 || !!(localValue && mask && !isComplete));
-	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(originalValue !== localValue);
+	let icon = $derived(optionIcon);
+	let dirty = $derived(config.dirty);
 	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(inEdit && value !== localValue);
 	let displayValue = $derived(inEdit ? localValue : applyMask(value));
 	let clearable = $derived(
 		config.clearValue === true &&
-			config.role !== 'inline' &&
+			!isTableCellRole(config.role) &&
 			inEdit &&
 			localValue != null &&
 			localValue !== ''
@@ -123,6 +123,9 @@
 			goTo(state) {
 				return state;
 			},
+			copy() {},
+			click() {},
+			toggle() {},
 			reset() {
 				localValue = value;
 				updateIsComplete();
@@ -133,7 +136,7 @@
 					inputElement.value = localValue || '';
 				}
 				errors = [];
-				return initialState;
+				return 'view';
 			}
 		},
 		view: {
@@ -156,13 +159,13 @@
 			_enter() {
 				localValue = value;
 			},
-			click() {
+			copy() {
 				copyAndTransition(() => csm, displayValue || String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -174,7 +177,6 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
 				localValue = value;
 				updateIsComplete();
 				dispatch('enteredit');
@@ -189,7 +191,6 @@
 				}
 			},
 			_exit() {
-				originalValue = undefined;
 				dispatch('exitedit');
 				dispatch('focusout');
 			},
@@ -206,19 +207,29 @@
 			focusout() {
 				this.submit();
 			},
+			change() {
+				if (debounceMs) {
+					clearTimeout(timer);
+					timer = setTimeout(() => {
+						dispatch('change', localValue);
+					}, debounceMs);
+				}
+			},
 			submit() {
+				clearTimeout(timer);
 				if (isDirty) {
 					if (mask && localValue && !isComplete) {
-						localValue = originalValue;
+						localValue = value;
 						updateIsComplete();
-						return initialState;
+						return 'view';
 					}
 					dispatch('change', localValue);
 				}
-				return initialState;
+				return 'view';
 			},
 			cancel() {
-				localValue = originalValue;
+				clearTimeout(timer);
+				localValue = value;
 				updateIsComplete();
 				dispatch('cancel');
 				if (inputMask) {
@@ -227,7 +238,7 @@
 				if (!mask && inputElement) {
 					inputElement.value = localValue || '';
 				}
-				return initialState;
+				return 'view';
 			},
 			keydown(e) {
 				if (!e) return;
@@ -296,12 +307,7 @@
 				localValue = inputMask.unmaskedValue;
 				updateIsComplete();
 				lastEdit = new Date();
-				if (debounceDelay) {
-					clearTimeout(timer);
-					timer = setTimeout(() => {
-						dispatch('change', localValue);
-					}, debounceDelay);
-				}
+				csm.change();
 			});
 
 			inputMask.on('complete', () => {
@@ -347,6 +353,12 @@
 	});
 
 	$effect(() => {
+		if (!inEdit) {
+			localValue = value;
+		}
+	});
+
+	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
 		} else if (readonly && copyable && value) {
@@ -366,10 +378,11 @@
 	role={config.role}
 	{csm}
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	{clearable}
 	{error}
 	{copyIcon}
+	align={config.align}
 	{color}
 	{background}
 	{buttons}
@@ -378,7 +391,7 @@
 		<input
 			bind:this={inputElement}
 			class="editor"
-			{placeholder}
+			placeholder={shouldShowCellViewChrome(config.role, inEdit) ? placeholder : ''}
 			disabled={$csm != 'editing'}
 			value={displayValue}
 			style:color={!isComplete ? 'var(--spectrum-global-color-gray-700)' : color}

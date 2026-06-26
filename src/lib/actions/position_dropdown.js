@@ -1,14 +1,44 @@
 export default function positionDropdown(element, opts) {
 	let resizeObserver;
 	let latestOpts = opts;
+	let rafId = null;
+	let lastAnchorRectKey = '';
+	let anchorLostDispatched = false;
 
-	// We need a static reference to this function so that we can properly
-	// clean up the scroll listener.
 	const scrollUpdate = () => {
 		updatePosition(latestOpts);
 	};
 
-	// Updates the position of the dropdown
+	const formatRectKey = (rect) =>
+		`${rect.top},${rect.left},${rect.width},${rect.height}`;
+
+	const trackAnchor = () => {
+		const { anchor } = latestOpts;
+
+		if (!anchor) {
+			rafId = requestAnimationFrame(trackAnchor);
+			return;
+		}
+
+		if (!anchor.isConnected) {
+			if (!anchorLostDispatched) {
+				anchorLostDispatched = true;
+				element.dispatchEvent(new CustomEvent('anchorlost', { bubbles: false }));
+			}
+			return;
+		}
+
+		anchorLostDispatched = false;
+		const rect = anchor.getBoundingClientRect();
+		const key = formatRectKey(rect);
+		if (key !== lastAnchorRectKey) {
+			lastAnchorRectKey = key;
+			updatePosition(latestOpts);
+		}
+
+		rafId = requestAnimationFrame(trackAnchor);
+	};
+
 	const updatePosition = (opts) => {
 		const {
 			anchor,
@@ -21,11 +51,10 @@ export default function positionDropdown(element, opts) {
 			customUpdate,
 			offsetBelow
 		} = opts;
-		if (!anchor) {
+		if (!anchor || !anchor.isConnected) {
 			return;
 		}
 
-		// Compute bounds
 		const anchorBounds = anchor.getBoundingClientRect();
 		const elementBounds = element.getBoundingClientRect();
 		let styles = {
@@ -39,21 +68,16 @@ export default function positionDropdown(element, opts) {
 		if (typeof customUpdate === 'function') {
 			styles = customUpdate(anchorBounds, elementBounds, styles);
 		} else {
-			const scrollY = window.scrollY;
-			const scrollX = window.scrollX;
-
-			// Determine vertical styles
 			if (align === 'right-outside' || align === 'left-outside') {
-				styles.top = anchorBounds.top + scrollY;
+				styles.top = anchorBounds.top;
 			} else if (window.innerHeight - anchorBounds.bottom < (maxHeight || 50)) {
-				styles.top = anchorBounds.top - elementBounds.height - offset + scrollY;
+				styles.top = anchorBounds.top - elementBounds.height - offset;
 				styles.maxHeight = maxHeight || 240;
 			} else {
-				styles.top = anchorBounds.bottom + (offsetBelow || offset) + scrollY;
+				styles.top = anchorBounds.bottom + (offsetBelow || offset);
 				styles.maxHeight = maxHeight || window.innerHeight - anchorBounds.bottom - 20;
 			}
 
-			// Determine horizontal styles
 			if (!maxWidth && useAnchorWidth) {
 				styles.maxWidth = anchorBounds.width;
 			}
@@ -64,17 +88,16 @@ export default function positionDropdown(element, opts) {
 			}
 
 			if (align === 'right') {
-				styles.left = anchorBounds.left + anchorBounds.width - elementBounds.width + scrollX;
+				styles.left = anchorBounds.left + anchorBounds.width - elementBounds.width;
 			} else if (align === 'right-outside') {
-				styles.left = anchorBounds.right + offset + scrollX;
+				styles.left = anchorBounds.right + offset;
 			} else if (align === 'left-outside') {
-				styles.left = anchorBounds.left - elementBounds.width - offset + scrollX;
+				styles.left = anchorBounds.left - elementBounds.width - offset;
 			} else {
-				styles.left = anchorBounds.left + scrollX;
+				styles.left = anchorBounds.left;
 			}
 		}
 
-		// Apply styles
 		Object.entries(styles).forEach(([style, value]) => {
 			if (value != null) {
 				element.style[style] = `${value.toFixed(0)}px`;
@@ -84,43 +107,42 @@ export default function positionDropdown(element, opts) {
 		});
 	};
 
-	// The actual svelte action callback which creates observers on the relevant
-	// DOM elements
 	const update = (newOpts) => {
 		latestOpts = newOpts;
+		lastAnchorRectKey = '';
 
-		// Cleanup old state
 		if (resizeObserver) {
 			resizeObserver.disconnect();
 		}
 
-		// Do nothing if no anchor
 		const { anchor } = newOpts;
 		if (!anchor) {
 			return;
 		}
 
-		// Observe both anchor and element and resize the popover as appropriate
 		resizeObserver = new ResizeObserver(() => updatePosition(newOpts));
 		resizeObserver.observe(anchor);
 		resizeObserver.observe(element);
 		resizeObserver.observe(document.body);
+
+		updatePosition(newOpts);
 	};
 
-	// Apply initial styles which don't need to change
-	element.style.position = 'absolute';
+	element.style.position = 'fixed';
 	element.style.zIndex = '9999';
 
-	// Set up a scroll listener
 	document.addEventListener('scroll', scrollUpdate, true);
 
-	// Perform initial update
 	update(opts);
+	rafId = requestAnimationFrame(trackAnchor);
 
 	return {
 		update,
 		destroy() {
-			// Cleanup
+			if (rafId) {
+				cancelAnimationFrame(rafId);
+				rafId = null;
+			}
 			if (resizeObserver) {
 				resizeObserver.disconnect();
 			}

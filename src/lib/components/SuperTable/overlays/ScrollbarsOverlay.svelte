@@ -1,62 +1,71 @@
-<svelte:options runes={false} />
-
 <script>
-  import { getContext, createEventDispatcher, afterUpdate } from "svelte";
+  import { createEventDispatcher, untrack } from "svelte";
 
-  const stbScrollPos = getContext("stbScrollPos");
-  const stbHorizontalScrollPos = getContext("stbHorizontalScrollPos");
-  const stbSettings = getContext("stbSettings");
-
-  export let highlighted;
-  export let horizontalOffset = "0px";
-
-  export let clientHeight;
-  export let scrollHeight;
-  export let scrollWidth;
-
-  export let visible;
-  export let horizontalVisible;
-  export let anchor;
+  let {
+    scrollPos = $bindable(0),
+    horizontalScrollPos = $bindable(0),
+    highlighted,
+    horizontalOffset = "0px",
+    clientHeight,
+    scrollHeight,
+    visible = $bindable(),
+    horizontalVisible = $bindable(),
+    anchor,
+    tableWidth,
+  } = $props();
 
   const dispatch = createEventDispatcher();
 
   let startPos;
   let startScrollPos;
   let horizontalStartPos;
-  let verticalRange;
-  let horizontalRange;
-  let dragging = false;
-  let horizontalDragging = false;
+  let verticalRange = $state(0);
+  let horizontalRange = $state(0);
+  let dragging = $state(false);
+  let horizontalDragging = $state(false);
   let mouseoffset = 0;
-  let width;
-  let left;
+  let scrollWidth = $state(0);
+  let width = $state("0%");
 
-  // Positioning Offsets
-  $: verticalTopOffset = $stbSettings.appearance.headerHeight + 8 + "px";
-  $: verticalBottomOffset = $stbSettings.appearance.footerHeight + 16 + "px";
-  $: horizontalBotttomOffset = $stbSettings.appearance.footerHeight + 8 + "px";
-
-  // Scrollbar variables
-  $: top = ($stbScrollPos / (scrollHeight + 32)) * 100 + "%";
-  $: left = ($stbHorizontalScrollPos / scrollWidth) * 100 + "%";
-  $: height = (clientHeight / scrollHeight) * 100 + "%";
+  let top = $derived((scrollPos / (scrollHeight + 32)) * 100 + "%");
+  let left = $derived((horizontalScrollPos / scrollWidth) * 100 + "%");
+  let height = $derived((clientHeight / scrollHeight) * 100 + "%");
 
   export const calculate = () => {
     if (!anchor) return;
 
-    verticalRange = Math.max(scrollHeight - clientHeight, 0);
-    horizontalRange = anchor?.scrollWidth - anchor?.clientWidth;
-    visible = verticalRange;
-    horizontalVisible = horizontalRange;
-    scrollWidth = anchor?.scrollWidth;
-    width = (anchor?.clientWidth / anchor?.scrollWidth) * 100 + "%";
+    const nextVerticalRange = Math.max(scrollHeight - clientHeight, 0);
+    const nextHorizontalRange = anchor.scrollWidth - anchor.clientWidth;
+    const nextScrollWidth = anchor.scrollWidth;
+    const nextWidth = (anchor.clientWidth / anchor.scrollWidth) * 100 + "%";
+
+    verticalRange = nextVerticalRange;
+    horizontalRange = nextHorizontalRange;
+    scrollWidth = nextScrollWidth;
+    width = nextWidth;
+
+    visible = nextVerticalRange;
+    horizontalVisible = nextHorizontalRange;
   };
 
-  afterUpdate(() => {
-    calculate?.();
+  $effect(() => {
+    anchor;
+    clientHeight;
+    scrollHeight;
+    tableWidth;
+    untrack(() => calculate());
+  });
+
+  $effect(() => {
+    horizontalScrollPos;
+    anchor;
+    untrack(() => {
+      if (anchor) anchor.scrollLeft = horizontalScrollPos;
+    });
   });
 </script>
 
+<!-- svelte-ignore event_directive_deprecated -->
 <svelte:window
   on:mouseup={() => {
     dragging = false;
@@ -74,7 +83,7 @@
             (e.clientY - startPos) * (scrollHeight / clientHeight) +
             startScrollPos;
           if (mouseoffset > 0 && mouseoffset <= verticalRange)
-            $stbScrollPos = mouseoffset;
+            scrollPos = mouseoffset;
           dispatch("positionChange");
         }
         if (horizontalDragging) {
@@ -85,9 +94,9 @@
               (anchor?.scrollWidth / anchor?.clientWidth) +
             startScrollPos;
           if (mouseoffset > 0 && mouseoffset <= horizontalRange)
-            $stbHorizontalScrollPos = mouseoffset;
+            horizontalScrollPos = mouseoffset;
         }
-        anchor.scrollLeft = $stbHorizontalScrollPos;
+        anchor.scrollLeft = horizontalScrollPos;
       }
     : () => {}}
 />
@@ -96,40 +105,44 @@
   class="stb-scrollbar"
   class:hidden={!verticalRange}
   class:highlighted={highlighted || dragging}
-  style:--offset={verticalTopOffset}
-  style:--bottomOffset={verticalBottomOffset}
 >
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore event_directive_deprecated -->
   <div
     class="stb-scrollbar-indicator"
     class:dragging
     style:top
     style:height
-    on:mousedown|stopPropagation|preventDefault={(e) => {
+    on:mousedown={(e) => {
+      e.stopPropagation();
+      e.preventDefault();
       dragging = true;
       startPos = e.clientY;
-      startScrollPos = $stbScrollPos;
+      startScrollPos = scrollPos;
     }}
   ></div>
 </div>
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="stb-scrollbar horizontal"
   class:hidden={!horizontalRange}
   class:highlighted={highlighted || horizontalDragging}
   style:--horizontalOffset={horizontalOffset}
-  style:--horizontalBottomOffset={horizontalBotttomOffset}
 >
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore event_directive_deprecated -->
   <div
     class="stb-scrollbar-indicator horizontal"
     style:left
     style:width
     class:dragging={horizontalDragging}
-    on:mousedown|stopPropagation|preventDefault={(e) => {
+    on:mousedown={(e) => {
+      e.stopPropagation();
+      e.preventDefault();
       horizontalDragging = true;
       horizontalStartPos = e.clientX;
-      startScrollPos = $stbHorizontalScrollPos;
+      startScrollPos = horizontalScrollPos;
     }}
   ></div>
 </div>
@@ -138,8 +151,8 @@
   .stb-scrollbar {
     position: absolute;
     right: 8px;
-    top: var(--offset);
-    bottom: var(--bottomOffset);
+    top: calc(var(--super-table-header-height, 0px) + 8px);
+    bottom: calc(var(--super-table-footer-height, 0px) + 16px);
     width: 8px;
     border-radius: 4px;
     opacity: 0.2;
@@ -154,7 +167,7 @@
 
   .stb-scrollbar.horizontal {
     top: unset;
-    bottom: var(--horizontalBottomOffset);
+    bottom: calc(var(--super-table-footer-height, 0px) + 8px);
     left: calc(var(--horizontalOffset) + 8px);
     width: calc(100% - 32px - var(--horizontalOffset));
     height: 8px;

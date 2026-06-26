@@ -4,8 +4,8 @@
 	import { generate } from 'shortid';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import SimpleButton from '../UI/elements/SimpleButton.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import SimpleButton from '../buttons/SimpleButton.svelte';
+	import { copyAndTransition, deferJustCopied } from './helpers';
 
 	let {
 		id,
@@ -24,7 +24,10 @@
 		'*': {
 			goTo(state) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			focus() {
@@ -36,22 +39,21 @@
 		readonly: {},
 		disabled: {},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, displayText);
 			},
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
 		justCopied: deferJustCopied(() => csm),
 		editing: {
 			_enter() {
-				originalValue = [...outputValue];
-				cellValues = enrichValue(value);
-				rowErrors = cellValues.map(() => '');
+				localValue = enrichValue(value);
+				syncDuplicateRowErrors();
 				dispatch('enteredit');
 			},
 			_exit() {
@@ -67,8 +69,8 @@
 				return 'view';
 			},
 			cancel() {
-				cellValues = enrichValue(value);
-				rowErrors = cellValues.map(() => '');
+				localValue = enrichValue(value);
+				rowErrors = localValue.map(() => '');
 				focusedRowIndex = -1;
 				dispatch('cancel');
 				return 'view';
@@ -83,7 +85,7 @@
 	});
 
 	let zoneType = $state(generate());
-	let cellValues = $state<string[]>(['']);
+	let localValue = $state<string[]>(['']);
 	let dragging = $state(false);
 	let focusedRowIndex = $state(-1);
 	let inputRefs = $state<Record<number, HTMLInputElement>>({});
@@ -91,7 +93,6 @@
 	let rowErrors = $state<string[]>([]);
 	let draggableItems = $state<Array<{ id: string; value: string; index: number }>>([]);
 	let rowIds = $state<string[]>([]);
-	let originalValue = $state<string[]>([]);
 	let tabindex = $state(0);
 
 	let config = $derived(cellOptions ?? {});
@@ -118,10 +119,18 @@
 		return isNaN(raw) ? 0 : raw;
 	});
 
-	let outputValue = $derived(cellValues.filter((x) => x));
+	let outputValue = $derived(localValue.filter((x) => x));
 	let canEdit = $derived($csm === 'editing');
+	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(
+		inEdit &&
+			JSON.stringify(outputValue) !==
+				JSON.stringify(
+					Array.isArray(value) ? value.filter((x) => x) : value ? [String(value)] : []
+				)
+	);
 	let rowLocked = $derived(readonly || disabled || !canEdit);
-	let isDirty = $derived(canEdit && JSON.stringify(outputValue) !== JSON.stringify(originalValue));
+	let dirty = $derived(config.dirty);
 	let hasCopyValue = $derived(
 		Array.isArray(value) ? value.length > 0 : value != null && value !== ''
 	);
@@ -213,20 +222,46 @@
 		return updated;
 	};
 
+	const hasDuplicateValues = (rows: string[] = localValue) => {
+		const seen = new Set<string>();
+
+		for (const val of rows) {
+			const normalized = normalizeValue(val);
+			if (!normalized) continue;
+			if (seen.has(normalized)) return true;
+			seen.add(normalized);
+		}
+
+		return false;
+	};
+
 	const commitValue = () => {
+		if (rowErrors.some((message) => message)) return;
+		if (hasDuplicateValues()) return;
+
 		dispatch('change', [...outputValue]);
 	};
 
-	const clearAllRowErrors = () => {
-		rowErrors = cellValues.map(() => '');
+	const clearRowError = (index: number) => {
+		if (!rowErrors[index]) return;
+		rowErrors = localValue.map((_, i) => (i === index ? '' : (rowErrors[i] ?? '')));
 	};
 
 	const setRowError = (index: number, message: string) => {
-		rowErrors = cellValues.map((_, i) => (i === index ? message : (rowErrors[i] ?? '')));
+		rowErrors = localValue.map((_, i) => (i === index ? message : (rowErrors[i] ?? '')));
+	};
+
+	const syncDuplicateRowErrors = () => {
+		rowErrors = localValue.map((val, index) => {
+			const trimmed = normalizeValue(val);
+			if (!trimmed) return '';
+			if (isDuplicateAt(index, trimmed)) return 'Duplicate value';
+			return '';
+		});
 	};
 
 	const focusRow = async (index: number) => {
-		if (dragging || index < 0 || index >= cellValues.length) return;
+		if (dragging || index < 0 || index >= localValue.length) return;
 
 		focusedRowIndex = index;
 		await tick();
@@ -239,7 +274,7 @@
 		const normalized = normalizeValue(value);
 		if (!normalized) return false;
 
-		return cellValues.some((val, i) => i !== index && normalizeValue(val) === normalized);
+		return localValue.some((val, i) => i !== index && normalizeValue(val) === normalized);
 	};
 
 	const validateRowValue = (index: number, rawValue: unknown) => {
@@ -257,58 +292,104 @@
 		return { ok: true as const, value: nextValue };
 	};
 
+	const removeEmptyRow = (index: number) => {
+		if (localValue.length <= parsedMin) {
+			if (localValue[index] !== '') {
+				localValue[index] = '';
+				localValue = [...localValue];
+				commitValue();
+			}
+			clearRowError(index);
+			return;
+		}
+
+		rowErrors.splice(index, 1);
+		localValue.splice(index, 1);
+		localValue = [...localValue];
+		rowErrors = [...rowErrors];
+
+		if (localValue.length === 0) {
+			localValue.push('');
+			rowErrors.push('');
+		}
+
+		if (focusedRowIndex === index) {
+			focusedRowIndex = -1;
+		} else if (focusedRowIndex > index) {
+			focusedRowIndex--;
+		}
+
+		commitValue();
+	};
+
 	const brain = {
 		handleChange: (detail: unknown, index: number) => {
 			if (rowLocked) return;
-
-			clearAllRowErrors();
 
 			const nextValue = detail == null ? '' : String(detail);
 			const trimmed = normalizeValue(nextValue);
 
 			if (!trimmed) {
-				rowErrors.splice(index, 1);
-				cellValues.splice(index, 1);
-				cellValues = [...cellValues];
-				rowErrors = [...rowErrors];
+				if (localValue[index] !== nextValue) {
+					localValue[index] = nextValue;
+					localValue = [...localValue];
+				}
+				clearRowError(index);
 				commitValue();
 				return;
+			}
+
+			if (localValue[index] !== nextValue) {
+				localValue[index] = nextValue;
+				localValue = [...localValue];
 			}
 
 			if (isDuplicateAt(index, trimmed)) {
 				setRowError(index, 'Duplicate value');
-				commitValue();
 				return;
 			}
 
-			if (cellValues[index] !== nextValue) {
-				cellValues[index] = nextValue;
-				cellValues = [...cellValues];
-			}
-
+			clearRowError(index);
 			commitValue();
 		},
 		validateInstances: () => {
 			if (dragging) return;
 
 			const next = applyMinMaxConstraints(
-				cellValues.filter((x) => x),
+				localValue.filter((x) => x),
 				parsedMin,
 				parsedMax
 			);
 
-			if (JSON.stringify(next) !== JSON.stringify(cellValues)) {
-				cellValues = next;
+			if (JSON.stringify(next) !== JSON.stringify(localValue)) {
+				localValue = next;
 			}
 
-			clearAllRowErrors();
+			syncDuplicateRowErrors();
+		},
+		handleInputFocusOut: (event: FocusEvent, index: number) => {
+			if (dragging || rowLocked) return;
+
+			const related = event.relatedTarget as Node | null;
+			const row = (event.currentTarget as HTMLElement).closest('.row');
+			if (related && row?.contains(related)) return;
+
+			const input = inputRefs[index];
+			const trimmed = normalizeValue(input?.value ?? localValue[index]);
+
+			if (!trimmed) {
+				removeEmptyRow(index);
+				return;
+			}
+
+			focusedRowIndex = -1;
 		},
 		moveItem: (fromIndex: number, toIndex: number) => {
-			if (!canEdit || toIndex < 0 || toIndex >= cellValues.length) return;
-			const next = [...cellValues];
+			if (!canEdit || toIndex < 0 || toIndex >= localValue.length) return;
+			const next = [...localValue];
 			const item = next.splice(fromIndex, 1)[0];
 			next.splice(toIndex, 0, item);
-			cellValues = next;
+			localValue = next;
 
 			if (focusedRowIndex === fromIndex) {
 				focusedRowIndex = toIndex;
@@ -332,24 +413,24 @@
 			dragging = false;
 			focusedRowIndex = -1;
 			draggableItems = e.detail.items;
-			cellValues = draggableItems.map((item) => item.value);
+			localValue = draggableItems.map((item) => item.value);
 			rowIds = draggableItems.map((item) => item.id);
 			commitValue();
 		},
 		handleRemove: (idx: number) => {
-			if (!canEdit || cellValues.length <= parsedMin) return;
+			if (!canEdit || localValue.length <= parsedMin) return;
 
-			cellValues.splice(idx, 1);
+			localValue.splice(idx, 1);
 			rowErrors.splice(idx, 1);
-			if (cellValues.length === 0) {
-				cellValues.push('');
+			if (localValue.length === 0) {
+				localValue.push('');
 				rowErrors.push('');
 			}
-			cellValues = [...cellValues];
+			localValue = [...localValue];
 			rowErrors = [...rowErrors];
 
-			if (focusedRowIndex >= cellValues.length) {
-				focusedRowIndex = cellValues.length - 1;
+			if (focusedRowIndex >= localValue.length) {
+				focusedRowIndex = localValue.length - 1;
 			} else if (focusedRowIndex > idx) {
 				focusedRowIndex--;
 			} else if (focusedRowIndex === idx) {
@@ -358,23 +439,29 @@
 
 			commitValue();
 		},
-		handleAdd: (index: number = cellValues.length - 1) => {
+		handleAdd: (index: number = localValue.length - 1) => {
 			if (!canEdit) return false;
 
-			clearAllRowErrors();
+			if (parsedMax > 0 && localValue.length >= parsedMax) return false;
 
-			if (parsedMax > 0 && cellValues.length >= parsedMax) return false;
-
-			const validation = validateRowValue(index, cellValues[index]);
+			const pendingValue = inputRefs[index]?.value ?? localValue[index];
+			const validation = validateRowValue(index, pendingValue);
 			if (!validation.ok) {
 				setRowError(index, validation.message);
 				focusRow(index);
 				return false;
 			}
 
-			cellValues = [...cellValues, ''];
+			if (localValue[index] !== validation.value) {
+				localValue[index] = validation.value;
+				localValue = [...localValue];
+			}
+
+			commitValue();
+
+			localValue = [...localValue, ''];
 			rowErrors = [...rowErrors, ''];
-			focusRow(cellValues.length - 1);
+			focusRow(localValue.length - 1);
 			return true;
 		},
 		moveRowUp: (index: number) => {
@@ -385,7 +472,7 @@
 			}
 		},
 		moveRowDown: (index: number) => {
-			if (index < cellValues.length - 1 && canEdit && reorder !== 'disabled') {
+			if (index < localValue.length - 1 && canEdit && reorder !== 'disabled') {
 				const newIndex = index + 1;
 				brain.moveItem(index, newIndex);
 				focusedRowIndex = newIndex;
@@ -399,7 +486,7 @@
 				event.stopPropagation();
 
 				const input = event.currentTarget as HTMLInputElement | null;
-				const pendingValue = input?.value ?? cellValues[index];
+				const pendingValue = input?.value ?? localValue[index];
 				const validation = validateRowValue(index, pendingValue);
 
 				if (!validation.ok) {
@@ -408,13 +495,13 @@
 					return;
 				}
 
-				if (cellValues[index] !== validation.value) {
-					cellValues[index] = validation.value;
-					cellValues = [...cellValues];
+				if (localValue[index] !== validation.value) {
+					localValue[index] = validation.value;
+					localValue = [...localValue];
 					commitValue();
 				}
 
-				if (index < cellValues.length - 1) {
+				if (index < localValue.length - 1) {
 					focusRow(index + 1);
 					return;
 				}
@@ -468,8 +555,8 @@
 
 		const next = enrichValue(value);
 
-		if (JSON.stringify(next) !== JSON.stringify(cellValues)) {
-			cellValues = next;
+		if (JSON.stringify(next) !== JSON.stringify(localValue)) {
+			localValue = next;
 			rowErrors = next.map(() => '');
 		}
 	});
@@ -477,7 +564,7 @@
 	$effect(() => {
 		if (dragging) return;
 
-		const count = cellValues.length;
+		const count = localValue.length;
 		let ids = rowIds;
 
 		if (ids.length < count) {
@@ -490,7 +577,7 @@
 			rowIds = ids;
 		}
 
-		const next = cellValues.map((item, index) => ({
+		const next = localValue.map((item, index) => ({
 			id: rowIds[index],
 			value: item,
 			index
@@ -551,6 +638,7 @@
 		}}
 		on:keydown={(e) => brain.handleKeyDown(e, idx)}
 		on:input={(e) => brain.handleChange(e.currentTarget.value, idx)}
+		on:focusout={(e) => brain.handleInputFocusOut(e, idx)}
 	/>
 {/snippet}
 
@@ -564,24 +652,24 @@
 					iconOnly
 					icon="ph ph-caret-up"
 					disabled={idx === 0}
-					on:select={() => brain.moveItem(idx, idx - 1)}
+					on:click={() => brain.moveItem(idx, idx - 1)}
 				/>
 				<SimpleButton
 					iconOnly
 					icon="ph ph-caret-down"
-					disabled={idx === cellValues.length - 1}
-					on:select={() => brain.moveItem(idx, idx + 1)}
+					disabled={idx === localValue.length - 1}
+					on:click={() => brain.moveItem(idx, idx + 1)}
 				/>
 			{/if}
 			<SimpleButton
 				iconOnly
-				icon={idx < cellValues.length - 1 ? 'ph ph-trash-simple' : 'ph ph-plus'}
+				icon={idx < localValue.length - 1 ? 'ph ph-trash-simple' : 'ph ph-plus'}
 				disabled={(parsedMax > 0 &&
-					idx === cellValues.length - 1 &&
-					cellValues.length >= parsedMax) ||
-					(idx < cellValues.length - 1 && cellValues.length <= parsedMin)}
-				on:select={() => {
-					if (idx < cellValues.length - 1) {
+					idx === localValue.length - 1 &&
+					localValue.length >= parsedMax) ||
+					(idx < localValue.length - 1 && localValue.length <= parsedMin)}
+				on:click={() => {
+					if (idx < localValue.length - 1) {
 						brain.handleRemove(idx);
 					} else {
 						brain.handleAdd();
@@ -634,9 +722,10 @@
 	{color}
 	background={cellBackground}
 	{copyIcon}
+	{align}
 	{tabindex}
 	multirow={true}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 >
 	{#if useDnD}
 		{#if reorder === 'handle'}
@@ -668,7 +757,7 @@
 		{/if}
 	{:else}
 		<div class="cells" class:view-mode={!canEdit} tabindex="-1">
-			{#each cellValues as _, idx (idx)}
+			{#each localValue as _, idx (idx)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<!-- svelte-ignore event_directive_deprecated -->
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -682,7 +771,7 @@
 					}}
 					on:focusout={brain.handleRowFocusOut}
 				>
-					{@render rowInput(idx, cellValues[idx])}
+					{@render rowInput(idx, localValue[idx])}
 					{@render rowActions(idx)}
 				</div>
 			{/each}
@@ -715,6 +804,7 @@
 		user-select: none;
 		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
 		overflow: hidden;
+		min-width: 0;
 		height: 2rem;
 		min-height: 2rem;
 		box-sizing: border-box;
@@ -736,7 +826,8 @@
 		color: var(--spectrum-global-color-blue-400) !important;
 	}
 
-	.row:focus {
+	.row:focus,
+	.row:focus-visible {
 		outline: none;
 	}
 

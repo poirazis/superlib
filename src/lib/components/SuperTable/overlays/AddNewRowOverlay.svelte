@@ -1,18 +1,19 @@
-<svelte:options runes={false} />
-
 <script>
-  export let stbState;
-  export let tableAPI;
-  export let highlighted;
-  export let footer;
-  export let tableActions;
+  let {
+    stbState,
+    tableAPI,
+    highlighted,
+    footer,
+    tableActions,
+  } = $props();
 
-  $: inInsert = $stbState == "Inserting";
+  let inInsert = $derived($stbState == "Inserting");
 </script>
 
 {#if $stbState == "Idle" || inInsert || tableActions?.length}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore event_directive_deprecated -->
   <div
     class="overlay-button add-row-overlay"
     class:highlighted
@@ -23,8 +24,9 @@
     <span> + </span>
   </div>
 
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore event_directive_deprecated -->
   <div
     class="overlay-button save-row-overlay"
     class:highlighted
@@ -41,8 +43,9 @@
 {/if}
 
 {#if $stbState == "Filtered"}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- svelte-ignore event_directive_deprecated -->
   <div
     class="overlay-button filter-row-overlay"
     class:highlighted

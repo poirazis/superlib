@@ -1,39 +1,48 @@
-<svelte:options runes={false} />
-
 <script>
   import { slide } from "svelte/transition";
   import { quintOut } from "svelte/easing";
-  import SuperButton from "../../Button.svelte";
+  import SuperButton from "../../buttons/SuperButton.svelte";
+  import { configuredButtonKey } from "../../../utils/buttonConditions.ts";
 
-  export let stbState;
-  export let stbSettings;
-  export let tableAPI;
-  export let highlighted;
-  export let footer;
-  export let selectedActions;
-  export let stbSelected;
-  export let entityPlural = "Rows";
-  export let entitySingular = "Row";
+  let {
+    tableAPI,
+    stbState,
+    stbSettings,
+    footerHeight = 0,
+    highlighted,
+    footer,
+    selectedActions,
+    stbSelected,
+    entityPlural = "Rows",
+    entitySingular = "Row",
+  } = $props();
 
-  let hidden;
-  $: if ($stbSelected.length == 0) hidden = false;
-  $: checkboxes = !$stbSettings.appearance.hideSelectionColumn;
+  let hidden = $state(false);
 
-  $: left =
+  $effect(() => {
+    if (stbSelected.size == 0) hidden = false;
+  });
+
+  let visibleActions = $derived(
+    tableAPI.resolveSelectionButtons(selectedActions),
+  );
+
+  let checkboxes = $derived(!stbSettings.appearance?.hideSelectionColumn);
+
+  let left = $derived(
     1 +
-    (checkboxes +
-      $stbSettings.features.canDelete +
-      $stbSettings.appearance.numberingColumn) *
-      2 +
-    "rem";
+      (checkboxes +
+        (stbSettings.features?.canDelete ? 1 : 0) +
+        (stbSettings.appearance?.numberingColumn ? 1 : 0)) *
+        2 +
+      "rem"
+  );
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-{#if $stbSelected.length && $stbState != "Inserting" && !hidden}
+{#if stbSelected.size && $stbState != "Inserting" && !hidden}
   <div
     class="selected-row-actions-overlay"
-    style:bottom={$stbSettings.appearance.footerHeight + 20}
+    style:bottom={footerHeight + 20}
     style:left
     class:highlighted
     class:footer
@@ -47,19 +56,15 @@
       onClick={() => (hidden = true)}
     />
     <span class="text">
-      {$stbSelected.length == 1
-        ? $stbSelected.length + " " + (entitySingular || "Row") + " "
-        : $stbSelected.length + " " + (entityPlural || "Rows") + " "} Selected
+      {stbSelected.size == 1
+        ? stbSelected.size + " " + (entitySingular || "Row") + " "
+        : stbSelected.size + " " + (entityPlural || "Rows") + " "} Selected
     </span>
-    {#each selectedActions as { text, icon, disabled, type, size, onClick }}
+    {#each visibleActions as button, index (configuredButtonKey(button, index))}
       <SuperButton
-        {text}
-        {icon}
+        {...button}
         quiet={true}
-        {type}
-        {disabled}
-        {size}
-        onClick={tableAPI.executeSelectedRowsAction(onClick)}
+        onClick={() => button.onClick?.()}
       />
     {/each}
   </div>

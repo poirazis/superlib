@@ -1,34 +1,36 @@
-<svelte:options runes={false} />
-
 <script>
   import SuperTableColumn from "../../SuperTableColumn/SuperTableColumn.svelte";
-  export let superColumns;
-  export let commonColumnOptions;
-  export let stbSettings;
 
-  export let columnsViewport;
-  export let showActionColumn;
-  export let canScroll;
+  let {
+    superColumns,
+    stbSettings,
+    columnsViewport = $bindable(),
+    showButtonColumnRight = false,
+    canScroll,
+    children,
+  } = $props();
 </script>
 
 <div bind:this={columnsViewport} class="st-master-columns" tabIndex="-1">
-  {#if $stbSettings.superColumnsPos == "first"}
-    <slot />
+  {#if stbSettings.superColumnsPos == "first"}
+    {@render children?.()}
   {/if}
 
-  {#each $superColumns as column, idx (idx)}
+  {#each superColumns as column, idx (`${column.name}-${column.canEdit ? 'edit' : 'view'}`)}
     <SuperTableColumn
       columnOptions={{
-        ...$commonColumnOptions,
         ...column,
         isFirst: idx == 0,
+        isFirstInsertable:
+          idx ==
+          superColumns.findIndex((c) => c.canEdit && c.canInsert),
         isLast:
-          idx == $superColumns.length - 1 && !showActionColumn && canScroll,
+          idx == superColumns.length - 1 && !showButtonColumnRight && canScroll,
       }}
     />
   {/each}
 
-  {#if $stbSettings.superColumnsPos == "last"}
-    <slot />
+  {#if stbSettings.superColumnsPos == "last"}
+    {@render children?.()}
   {/if}
 </div>
