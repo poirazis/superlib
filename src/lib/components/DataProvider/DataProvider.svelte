@@ -83,13 +83,7 @@
 		},
 		{
 			type: ActionTypes?.SetDataProviderSorting,
-			callback: ({
-				column,
-				order
-			}: {
-				column?: string;
-				order?: string;
-			}) => {
+			callback: ({ column, order }: { column?: string; order?: string }) => {
 				const newOptions: Record<string, unknown> = {};
 				if (column) {
 					newOptions.sortColumn = column;

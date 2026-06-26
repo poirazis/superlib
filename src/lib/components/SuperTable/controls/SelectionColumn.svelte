@@ -76,7 +76,6 @@
 					class:selected
 					class:hovered={rowState.hovered == visibleRow || rowState.menuRow == visibleRow}
 					class:disabled={meta?.disabled}
-
 					on:mouseenter={() => (rowState.hovered = visibleRow)}
 					on:mouseleave={() => (rowState.hovered = -1)}
 				>

@@ -236,9 +236,7 @@
 				style:text-align={cellOptions.align}
 			>
 				<div class="value">
-					{isEmpty
-						? resolveEmptyViewText(cellOptions?.placeholder, config.role, inEdit)
-						: viewText}
+					{isEmpty ? resolveEmptyViewText(cellOptions?.placeholder, config.role, inEdit) : viewText}
 				</div>
 			</div>
 		{/if}

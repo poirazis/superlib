@@ -24,9 +24,7 @@ export function getLegendOptions(
 ) {
 	const validPositions = ['top', 'bottom', 'left', 'right'];
 	const validAlignments = ['start', 'center', 'end'];
-	const orientation = ['top', 'bottom'].includes(legendPosition)
-		? 'horizontal'
-		: 'vertical';
+	const orientation = ['top', 'bottom'].includes(legendPosition) ? 'horizontal' : 'vertical';
 
 	return {
 		enabled: showLegend,

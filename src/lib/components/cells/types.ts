@@ -1,12 +1,6 @@
 import type { RowAttachment } from '@budibase/types';
 
-export type CellFsmState =
-	| 'view'
-	| 'editing'
-	| 'readonly'
-	| 'disabled'
-	| 'copyable'
-	| 'justCopied';
+export type CellFsmState = 'view' | 'editing' | 'readonly' | 'disabled' | 'copyable' | 'justCopied';
 
 export type AttachmentItem = RowAttachment;
 

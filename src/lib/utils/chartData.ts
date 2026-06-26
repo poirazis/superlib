@@ -4,9 +4,7 @@ export type CarbonChartRow = {
 	value: number;
 };
 
-export function normalizeValueColumns(
-	valueColumn: string | string[] | null | undefined
-): string[] {
+export function normalizeValueColumns(valueColumn: string | string[] | null | undefined): string[] {
 	if (!valueColumn) return [];
 	if (Array.isArray(valueColumn)) {
 		return valueColumn.map((col) => String(col).trim()).filter(Boolean);
@@ -22,7 +20,7 @@ export function mapRowsToCarbonData(
 	rows: Record<string, unknown>[] | undefined,
 	chartType: string,
 	labelColumn: string,
-	valueColumn: string | string[] | null | undefined,
+	valueColumn: string | string[] | null | undefined
 ): CarbonChartRow[] {
 	const valueColumns = normalizeValueColumns(valueColumn);
 	if (!labelColumn || !valueColumns.length || !rows?.length) return [];
@@ -32,11 +30,7 @@ export function mapRowsToCarbonData(
 	for (const row of rows) {
 		const label = String(row[labelColumn]);
 
-		if (
-			chartType === 'pieChart' ||
-			chartType === 'donutChart' ||
-			chartType === 'meterChart'
-		) {
+		if (chartType === 'pieChart' || chartType === 'donutChart' || chartType === 'meterChart') {
 			mappedData.push({
 				group: label,
 				label,

@@ -14,11 +14,7 @@ export { default as SuperLightbox } from './components/SuperLightbox/SuperLightb
 export { default as SuperTabs } from './components/SuperTabs/SuperTabs.svelte';
 export { default as SuperPopover } from './components/SuperPopover/SuperPopover.svelte';
 export { default as SuperModal } from './components/SuperModal/SuperModal.svelte';
-export {
-	resolvePortalTarget,
-	portalNode,
-	restoreNode
-} from './utils/portal.ts';
+export { resolvePortalTarget, portalNode, restoreNode } from './utils/portal.ts';
 export { default as SuperTree } from './components/SuperTree/SuperTree.svelte';
 export { default as SuperTable } from './components/SuperTable/SuperTable.svelte';
 export { default as SuperTableColumn } from './components/SuperTableColumn/SuperTableColumn.svelte';

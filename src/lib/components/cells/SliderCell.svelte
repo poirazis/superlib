@@ -4,7 +4,6 @@
 	import BaseCell from './BaseCell.svelte';
 	import { copyAndTransition, deferJustCopied } from './helpers';
 
-
 	const dispatch = createEventDispatcher();
 
 	let {

@@ -203,8 +203,7 @@ export function resolveFieldInnerType(
 
 		if (useSpecialFields) {
 			if (innerType === 'string' && subtype === 'array') {
-				innerType =
-					fieldSchemaName === 'tags' || fieldSchemaName === 'Tags' ? 'tags' : 'jsonarray';
+				innerType = fieldSchemaName === 'tags' || fieldSchemaName === 'Tags' ? 'tags' : 'jsonarray';
 			}
 			if (innerType === 'string' && fieldSchemaName.toUpperCase() === 'COLOR') innerType = 'color';
 			if (innerType === 'string' && fieldSchemaName.toUpperCase() === 'ICON') innerType = 'icon';

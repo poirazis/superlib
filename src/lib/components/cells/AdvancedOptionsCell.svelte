@@ -9,7 +9,6 @@
 	import {
 		copyAndTransition,
 		deferJustCopied,
-
 		emittedFieldValuesEqual,
 		resolveEmptyViewText,
 		resolveCustomOptionColor,

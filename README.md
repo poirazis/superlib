@@ -33,49 +33,49 @@ Import components from the package entry point:
 
 ### UI
 
-| Component | Description |
-| --- | --- |
-| `Button` | Action button with icons, confirm mode, timer/loop actions |
-| `Switch` | Toggle switch |
-| `Checkbox` | Checkbox input |
+| Component  | Description                                                |
+| ---------- | ---------------------------------------------------------- |
+| `Button`   | Action button with icons, confirm mode, timer/loop actions |
+| `Switch`   | Toggle switch                                              |
+| `Checkbox` | Checkbox input                                             |
 
 ### Layout & structure
 
-| Component | Description |
-| --- | --- |
-| `SuperField` | Labelled form field wrapper with help text and error display |
-| `SuperList` | Draggable, selectable list with row actions |
-| `SuperTabs` | Tabbed container |
-| `SuperLightbox` | Full-screen attachment/image viewer |
+| Component       | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| `SuperField`    | Labelled form field wrapper with help text and error display |
+| `SuperList`     | Draggable, selectable list with row actions                  |
+| `SuperTabs`     | Tabbed container                                             |
+| `SuperLightbox` | Full-screen attachment/image viewer                          |
 
 ### Cell editors
 
 Cell components are designed for inline editing in tables and forms. They use a shared `cellOptions` prop for role, readonly/disabled state, styling, and behaviour.
 
-| Component | Description |
-| --- | --- |
-| `TextCell` | Simple text display cell |
-| `StringCell` | String input with formatting and debounce |
-| `CellStringMask` | Masked string input (IMask) |
-| `NumberCell` | Number input with formatting |
-| `SliderCell` | Numeric slider |
-| `BooleanCell` | Boolean toggle |
-| `DatetimeCell` | Date/time picker |
-| `DatetimeRangeCell` | Date range picker |
-| `BaseDropdownCell` | Select / input-select dropdown |
-| `AdvancedOptionsCell` | Switches, buttons, and radio options |
-| `CellTags` | Tag input |
-| `CellLink` | Link field |
-| `CellLinkPickerSelect` | Link picker (select) |
-| `CellLinkPickerTree` | Link picker (tree) |
-| `CellSQLLink` | SQL-backed link field |
-| `CellSQLLinkPicker` | SQL link picker |
-| `CellAttachment` | Attachment upload (compact) |
-| `CellAttachmentExpanded` | Attachment upload (expanded/gallery) |
-| `CellAttachmentSlider` | Attachment carousel |
-| `CellColor` | Color picker |
-| `CellIcon` | Icon picker |
-| `CellJSON` | JSON editor |
+| Component                | Description                               |
+| ------------------------ | ----------------------------------------- |
+| `TextCell`               | Simple text display cell                  |
+| `StringCell`             | String input with formatting and debounce |
+| `CellStringMask`         | Masked string input (IMask)               |
+| `NumberCell`             | Number input with formatting              |
+| `SliderCell`             | Numeric slider                            |
+| `BooleanCell`            | Boolean toggle                            |
+| `DatetimeCell`           | Date/time picker                          |
+| `DatetimeRangeCell`      | Date range picker                         |
+| `BaseDropdownCell`       | Select / input-select dropdown            |
+| `AdvancedOptionsCell`    | Switches, buttons, and radio options      |
+| `CellTags`               | Tag input                                 |
+| `CellLink`               | Link field                                |
+| `CellLinkPickerSelect`   | Link picker (select)                      |
+| `CellLinkPickerTree`     | Link picker (tree)                        |
+| `CellSQLLink`            | SQL-backed link field                     |
+| `CellSQLLinkPicker`      | SQL link picker                           |
+| `CellAttachment`         | Attachment upload (compact)               |
+| `CellAttachmentExpanded` | Attachment upload (expanded/gallery)      |
+| `CellAttachmentSlider`   | Attachment carousel                       |
+| `CellColor`              | Color picker                              |
+| `CellIcon`               | Icon picker                               |
+| `CellJSON`               | JSON editor                               |
 
 ### Cell context
 
@@ -103,15 +103,15 @@ Clone the repo and install dependencies:
 bun install
 ```
 
-| Script | Description |
-| --- | --- |
-| `bun run dev` | Start the local showcase app |
-| `bun run build` | Build the showcase app and library package |
-| `bun run watch` | Rebuild the library on file changes |
-| `bun run lint` | Run Prettier checks |
-| `bun run format` | Format the codebase |
-| `bun run check` | Full svelte-check (includes untyped components) |
-| `bun run check:ts` | Type-check only components that use TypeScript |
+| Script             | Description                                     |
+| ------------------ | ----------------------------------------------- |
+| `bun run dev`      | Start the local showcase app                    |
+| `bun run build`    | Build the showcase app and library package      |
+| `bun run watch`    | Rebuild the library on file changes             |
+| `bun run lint`     | Run Prettier checks                             |
+| `bun run format`   | Format the codebase                             |
+| `bun run check`    | Full svelte-check (includes untyped components) |
+| `bun run check:ts` | Type-check only components that use TypeScript  |
 
 Source lives in `src/lib`. The showcase app in `src/routes` is for local preview only and is not published.
 

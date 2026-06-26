@@ -14,7 +14,7 @@ export function resolveRawColumnAlign(
 	schemaType?: string,
 	align?: string | null
 ): string | null | undefined {
-	return isUnsetColumnAlign(align) ? align ?? null : align;
+	return isUnsetColumnAlign(align) ? (align ?? null) : align;
 }
 
 /** Budibase columnList uses Left/Center/Right; SuperTableColumn uses flex-start/center/flex-end. */
@@ -41,10 +41,7 @@ export function normalizeColumnAlignInput(align?: string | null): string | null 
 	}
 }
 
-export function resolveColumnFlexAlign(
-	schemaType?: string,
-	align?: string | null
-): string {
+export function resolveColumnFlexAlign(schemaType?: string, align?: string | null): string {
 	const normalized = normalizeColumnAlignInput(align);
 	const type = schemaType ?? 'string';
 

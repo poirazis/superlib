@@ -11,10 +11,7 @@ import type {
 } from './types.ts';
 
 /** Right-aligned copyable cells keep the copy icon visible to avoid empty trailing space. */
-export function resolveCopyIconOnHover(
-	copyIcon?: string,
-	align?: string | null
-): boolean {
+export function resolveCopyIconOnHover(copyIcon?: string, align?: string | null): boolean {
 	if (copyIcon !== 'onhover') return false;
 	if (align == null || String(align).trim() === '') return true;
 	return flexAlignToCellAlign(align) !== 'right';
@@ -66,10 +63,7 @@ export function inferDisplayFieldFromRow(
 }
 
 /** Resolve a link row label from primaryDisplay, a known field, or the first row key. */
-export function resolveLinkRowDisplay(
-	row: Record<string, unknown>,
-	displayField?: string
-): string {
+export function resolveLinkRowDisplay(row: Record<string, unknown>, displayField?: string): string {
 	if (row.primaryDisplay != null && row.primaryDisplay !== '') {
 		return String(row.primaryDisplay);
 	}
@@ -154,8 +148,11 @@ export function normalizeSingleAttachment(
 }
 
 export function hasAttachmentValue(value: unknown): boolean {
-	return normalizeSingleAttachment(value as AttachmentItem | AttachmentItem[] | string | null | undefined)
-		.length > 0;
+	return (
+		normalizeSingleAttachment(
+			value as AttachmentItem | AttachmentItem[] | string | null | undefined
+		).length > 0
+	);
 }
 
 export function normalizeAttachments(
@@ -224,11 +221,7 @@ export function shouldShowCellViewChrome(role?: string, inEdit = false): boolean
 	return !isTableCellRole(role) || inEdit;
 }
 
-export function resolveEmptyViewText(
-	placeholder: unknown,
-	role?: string,
-	inEdit = false
-): string {
+export function resolveEmptyViewText(placeholder: unknown, role?: string, inEdit = false): string {
 	if (!shouldShowCellViewChrome(role, inEdit)) {
 		return '';
 	}
@@ -300,7 +293,11 @@ export function resolveCustomOptionColor(
 	const optionColors = fieldSchema?.optionColors;
 	const inclusion = fieldSchema?.constraints?.inclusion;
 
-	if (!Array.isArray(optionColors) || !Array.isArray(inclusion) || customIndex >= optionColors.length) {
+	if (
+		!Array.isArray(optionColors) ||
+		!Array.isArray(inclusion) ||
+		customIndex >= optionColors.length
+	) {
 		return undefined;
 	}
 

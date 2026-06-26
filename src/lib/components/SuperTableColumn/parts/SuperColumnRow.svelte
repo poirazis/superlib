@@ -117,17 +117,17 @@
 		{#key columnOptions.cellComponent}
 			{@const Cell = columnOptions.cellComponent}
 			<Cell
-			cellOptions={{
-				...columnOptions.cellOptions,
-				disabled
-			}}
-			fieldSchema={columnOptions.schema}
-			tableid={columnOptions.tableId}
-			{value}
-			displayValue={cellDisplayValue}
-			on:enteredit={() => columnState.enteredit(index)}
-			on:exitedit={columnState.exitedit}
-			on:change={(e) => patchRow(e.detail)}
+				cellOptions={{
+					...columnOptions.cellOptions,
+					disabled
+				}}
+				fieldSchema={columnOptions.schema}
+				tableid={columnOptions.tableId}
+				{value}
+				displayValue={cellDisplayValue}
+				on:enteredit={() => columnState.enteredit(index)}
+				on:exitedit={columnState.exitedit}
+				on:change={(e) => patchRow(e.detail)}
 			/>
 		{/key}
 		{#if info}
