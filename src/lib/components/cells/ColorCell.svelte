@@ -2,7 +2,13 @@
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		consumeOpenOnEnter,
+		copyAndTransition,
+		deferJustCopied,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter
+	} from './helpers';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 
 	const dispatch = createEventDispatcher();
@@ -20,7 +26,6 @@
 	let popup = $state<HTMLElement | null>(null);
 	let open = $state(false);
 	let customValue = $state('');
-	let originalValue = $state();
 	let localValue = $state(null);
 
 	let config = $derived(cellOptions ?? {});
@@ -39,16 +44,15 @@
 	let showTheme = $derived(config.themeColors !== false);
 	let showStatic = $derived(config.staticColors !== false);
 	let inEdit = $derived($csm === 'editing');
-	let inline = $derived(config.role === 'inline');
 	let error = $derived(optionError);
 	let icon = $derived.by(() => {
 		const raw = config.icon;
 		if (!raw) return undefined;
 		return raw.replace(/^ph ph-/, '').replace(/^ph-/, '');
 	});
-	let isDirty = $derived(inEdit && localValue !== originalValue);
+	let dirty = $derived(config.dirty);
 
-	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
+	let cellRole = $derived(config.role ?? 'form');
 
 	let categories = $derived(generateCategories(showTheme, showStatic));
 	let customCategory = $derived(generateCustomCategory(customColors));
@@ -203,9 +207,6 @@
 		localValue = selectedValue;
 		dispatch('change', selectedValue);
 		open = false;
-		if (inline) {
-			csm.submit();
-		}
 	};
 
 	const handleKeydown = (event, colorName, isCustom) => {
@@ -219,14 +220,26 @@
 		'*': {
 			goTo(state) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {
 				open = false;
 			},
 			focus() {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					requestOpenOnEnter();
+					return 'editing';
+				}
+			},
+			toggle() {
+				if (!readonly && !disabled) {
+					requestIconOpenOnEnter();
+					return 'editing';
+				}
 			}
 		},
 		readonly: {
@@ -238,13 +251,13 @@
 			_enter() {
 				open = false;
 			},
-			click() {
+			copy() {
 				copyAndTransition(() => csm, String(localValue ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -256,23 +269,26 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = localValue;
+				localValue = value ?? null;
 				customValue = getCustomValue(localValue) ?? '';
-				open = false;
+				open = consumeOpenOnEnter();
 				dispatch('enteredit');
 			},
 			_exit() {
 				open = false;
 				dispatch('exitedit');
 			},
-			click() {
+			toggle() {
 				open = !open;
+			},
+			click() {
+				this.toggle();
 			},
 			keydown(e) {
 				if (e.key === ' ' || e.keyCode === 32) {
 					e.stopPropagation();
 					e.preventDefault();
-					open = !open;
+					this.toggle();
 				}
 
 				if (e.key === 'Escape') {
@@ -281,7 +297,7 @@
 			},
 			exitPopup() {
 				open = false;
-				return readonly ? 'readonly' : inline ? 'view' : 'editing';
+				return readonly ? 'readonly' : 'editing';
 			},
 			focusout(e) {
 				const related = e.relatedTarget;
@@ -305,17 +321,19 @@
 			},
 			submit() {
 				open = false;
-				return readonly ? 'readonly' : inline ? 'view' : 'editing';
+				return readonly ? 'readonly' : 'editing';
 			},
 			cancel() {
 				open = false;
-				return readonly ? 'readonly' : inline ? 'view' : 'editing';
+				return readonly ? 'readonly' : 'editing';
 			}
 		}
 	});
 
 	$effect(() => {
-		localValue = value ?? null;
+		if (!inEdit) {
+			localValue = value ?? null;
+		}
 	});
 
 	$effect(() => {
@@ -340,11 +358,11 @@
 <!-- svelte-ignore event_directive_deprecated -->
 <BaseCell
 	{id}
-	role={baseRole}
+	role={cellRole}
 	{csm}
 	bind:anchor
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	clearable={false}
 	naked={true}
 	{error}
@@ -352,6 +370,7 @@
 	{color}
 	{background}
 	popupOpen={open}
+	controlIcon={'ph ph-caret-down'}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
 	<div class="color-display">
@@ -648,7 +667,8 @@
 		font-style: italic;
 	}
 
-	.custom-input:focus {
+	.custom-input:focus,
+	.custom-input:focus-visible {
 		outline: none;
 		border-color: var(--spectrum-global-color-blue-500);
 	}

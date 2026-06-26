@@ -30,11 +30,15 @@ export type ConfiguredButton = Record<string, unknown> & {
 	icon?: string;
 };
 
+/** Minimum sdk fields required for button resolution. */
 export type ButtonConditionsSdk = {
 	QueryUtils: QueryUtilsType;
 	processStringSync: ProcessStringSync;
 	enrichButtonActions: EnrichButtonActions;
 };
+
+/** Budibase client SDK — pass directly from getContext("sdk"). */
+export type BudibaseSdk = ButtonConditionsSdk & Record<string, unknown>;
 
 export type ResolveConfiguredButtonsOptions = {
 	forceDisabled?: boolean;
@@ -160,7 +164,7 @@ const enrichStringProp = (
 const resolveConfiguredButton = (
 	button: ConfiguredButton,
 	context: Record<string, unknown>,
-	sdk: ButtonConditionsSdk,
+	sdk: BudibaseSdk,
 	options: ResolveConfiguredButtonsOptions = {}
 ) => {
 	const { QueryUtils, processStringSync, enrichButtonActions } = sdk;
@@ -214,10 +218,11 @@ const resolveConfiguredButton = (
 	return resolved;
 };
 
+/** Resolve nestable SuperButton children. Pass the full sdk from getContext("sdk"). */
 export const resolveConfiguredButtons = (
 	buttons: ConfiguredButton[] | undefined,
 	context: Record<string, unknown>,
-	sdk: ButtonConditionsSdk,
+	sdk: BudibaseSdk,
 	options: ResolveConfiguredButtonsOptions = {}
 ): Record<string, unknown>[] => {
 	if (!buttons?.length) {
@@ -228,3 +233,45 @@ export const resolveConfiguredButtons = (
 		.map((button) => resolveConfiguredButton(button, context, sdk, options))
 		.filter((button): button is Record<string, unknown> => button != null);
 };
+
+export function normalizeMenuItemsVisible(value: unknown, defaultValue = 1) {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0) {
+		return defaultValue;
+	}
+
+	return Math.floor(parsed);
+}
+
+export function splitRowMenuButtons<T>(
+	buttons: T[] | undefined,
+	menuItemsVisible: unknown
+): { inlineButtons: T[]; overflowButtons: T[] } {
+	const items = Array.isArray(buttons) ? buttons : [];
+	const visibleCount = normalizeMenuItemsVisible(menuItemsVisible);
+
+	if (visibleCount === 0) {
+		return { inlineButtons: [], overflowButtons: items };
+	}
+
+	if (visibleCount >= items.length) {
+		return { inlineButtons: items, overflowButtons: [] };
+	}
+
+	return {
+		inlineButtons: items.slice(0, visibleCount),
+		overflowButtons: items.slice(visibleCount)
+	};
+}
+
+export function configuredButtonKey(
+	button: Record<string, unknown> | undefined,
+	index: number
+) {
+	const id = button?._id ?? button?.id;
+	if (id != null && id !== '') {
+		return String(id);
+	}
+
+	return `button-${index}`;
+}

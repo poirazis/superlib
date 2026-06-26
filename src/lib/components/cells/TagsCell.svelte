@@ -4,13 +4,20 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
-	import { OPTIONS_COLORS_ARRAY } from './optionsColors';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		copyAndTransition,
+		deferJustCopied,
+		resolveEmptyViewText,
+		resolveOptionColor,
+		shouldShowCellViewChrome
+	} from './helpers';
+
+	const SEARCH_DEBOUNCE_MS = 250;
 
 	const dispatch = createEventDispatcher();
 	const { API, QueryUtils, fetchData } = getContext('sdk');
 
-	let { id, cellOptions, value, autofocus = false } = $props();
+	let { id, cellOptions, fieldSchema, value, autofocus = false } = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
 	let popup = $state<HTMLElement | null>(null);
@@ -26,18 +33,14 @@
 	let isFetchMore = $state(false);
 	let localValue = $state<string[]>([]);
 	let filterTerm = $state('');
-	let originalValue = $state('[]');
 	let fetch = $state<ReturnType<typeof fetchData>>();
 	let lastFetchKey = $state('');
 	let lastBaseFetchKey = $state('');
 
 	let config = $derived(cellOptions ?? {});
-	let controlType = $derived(config.controlType);
 	let suggestions = $derived(config.suggestions);
 	let valueColumn = $derived(config.valueColumn);
-	let customOptions = $derived(config.customOptions);
-	let optionsViewMode = $derived(config.optionsViewMode);
-	let role = $derived(config.role);
+	let role = $derived(config.role ?? 'form');
 	let readonly = $derived(config.readonly);
 	let disabled = $derived(config.disabled);
 	let copyable = $derived(config.copyable);
@@ -50,11 +53,16 @@
 	let align = $derived(config.align);
 	let datasource = $derived(config.datasource);
 	let filter = $derived(config.filter);
-	let debounceDelay = $derived(config.debounce);
+	let debounceMs = $derived(config.debounce ?? null);
 
 	let isEmpty = $derived(localValue.length < 1);
 	let inEdit = $derived($csm === 'editing');
-	let isDirty = $derived(inEdit && originalValue !== JSON.stringify(localValue));
+	let dirty = $derived(config.dirty);
+	let isDirty = $derived(
+		inEdit &&
+			JSON.stringify(localValue) !==
+				JSON.stringify(Array.isArray(value) ? value : value ? [value] : [])
+	);
 	let tabindex = $state(0);
 
 	let displayOptions = $derived(filteredOptions.filter((option) => !localValue.includes(option)));
@@ -63,32 +71,19 @@
 	);
 
 	let tagColors = $derived.by(() => {
-		const colors: Record<string, string> = {};
-		options.forEach((option, index) => {
-			colors[option] = OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length];
-		});
-		localValue.forEach((tag, index) => {
-			if (!colors[tag]) {
-				colors[tag] = OPTIONS_COLORS_ARRAY[index % OPTIONS_COLORS_ARRAY.length];
-			}
-		});
+		const colors: Record<string, string | undefined> = {};
+		for (const tag of [...options, ...localValue]) {
+			if (colors[tag] !== undefined) continue;
+			colors[tag] = resolveOptionColor(tag, fieldSchema);
+		}
 		return colors;
 	});
 
 	const getCopyText = () => localValue.join(', ');
 
-	const emitChange = (immediate = false) => {
-		if (!debounceDelay || immediate) {
-			dispatch('change', [...localValue]);
-			dispatch('labelChange', getCopyText() || null);
-			return;
-		}
-
-		clearTimeout(timer);
-		timer = setTimeout(() => {
-			dispatch('change', [...localValue]);
-			dispatch('labelChange', getCopyText() || null);
-		}, debounceDelay);
+	const dispatchChange = () => {
+		dispatch('change', [...localValue]);
+		dispatch('labelChange', getCopyText() || null);
 	};
 
 	const addUniqueTags = (tagsToAdd: string[]) => {
@@ -113,7 +108,7 @@
 
 		if (newTags.length) {
 			localValue = [...localValue, ...newTags];
-			emitChange();
+			csm.change();
 		}
 	};
 
@@ -164,14 +159,6 @@
 		if (isInitialLoad) isInitialLoad = false;
 	};
 
-	const loadCustomOptions = () => {
-		options =
-			customOptions?.map((row: { value?: string } | string) =>
-				typeof row === 'object' ? String(row.value ?? '') : String(row)
-			) ?? [];
-		filteredOptions = [...options];
-	};
-
 	const toggleOption = (optionOrIdx: string | number) => {
 		if (disabled || readonly) return;
 
@@ -181,7 +168,7 @@
 		const pos = localValue.indexOf(option);
 		if (pos > -1) {
 			localValue = localValue.filter((_, index) => index !== pos);
-			emitChange();
+			csm.change();
 		}
 	};
 
@@ -221,25 +208,16 @@
 			isFetchMore = false;
 			lastFetchKey = fetchKey;
 			fetch.update({ query, limit: initLimit });
-		}, debounceDelay || 250);
+		}, SEARCH_DEBOUNCE_MS);
 	};
 
 	const filterOptions = (term: string) => {
 		filterTerm = term;
 
-		if (suggestions) {
-			scheduleDataSearch(term);
-			focusIdx = -1;
-			return;
-		}
+		if (!suggestions) return;
 
-		if (term) {
-			filteredOptions = options.filter((option) =>
-				option.toLocaleLowerCase().startsWith(term.toLocaleLowerCase())
-			);
-		} else {
-			filteredOptions = [...options];
-		}
+		scheduleDataSearch(term);
+		focusIdx = -1;
 	};
 
 	const handleEditorInput = () => {
@@ -320,7 +298,7 @@
 				focusIdx = -1;
 				editor?.focus();
 			} else {
-				localValue = JSON.parse(originalValue);
+				localValue = Array.isArray(value) ? [...value] : value ? [value] : [];
 				clearInputState();
 				anchor?.blur();
 				csm.goTo('view');
@@ -329,24 +307,23 @@
 		}
 
 		if (e.key === 'Backspace' && !(editor?.value ?? filterTerm) && localValue.length) {
+			e.preventDefault();
 			localValue = localValue.slice(0, -1);
-			emitChange();
+			csm.change();
 		}
+	};
 
-		if (
-			controlType === 'select' &&
-			e.key === 'Backspace' &&
-			!(editor?.value ?? filterTerm) &&
-			!popupOpen
-		) {
-			localValue = [];
-			emitChange();
-		}
+	const handleEditorKeydown = (e: KeyboardEvent) => {
+		e.stopPropagation();
+		navigateOptions(e);
 	};
 
 	const csm = fsm('view', {
 		'*': {
-			goTo: (state: string) => state
+			goTo: (state: string) => state,
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			focus: () => {
@@ -355,7 +332,7 @@
 		},
 		editing: {
 			_enter: () => {
-				originalValue = JSON.stringify(Array.isArray(value) ? value : value ? [value] : []);
+				localValue = Array.isArray(value) ? [...value] : value ? [value] : [];
 				dispatch('enteredit');
 				setTimeout(() => editor?.focus(), 0);
 			},
@@ -365,18 +342,41 @@
 				}
 				clearInputState();
 				dispatch('exitedit');
-				if (isDirty) {
-					emitChange(true);
+			},
+			change() {
+				if (debounceMs) {
+					clearTimeout(timer);
+					timer = setTimeout(() => dispatchChange(), debounceMs);
 				}
+			},
+			submit() {
+				if (isDirty && !debounceMs) {
+					dispatchChange();
+				}
+			},
+			cancel() {
+				clearTimeout(timer);
+				localValue = Array.isArray(value) ? [...value] : value ? [value] : [];
+				clearInputState();
+				return 'view';
 			},
 			focusout: (e: FocusEvent) => {
 				const related = e.relatedTarget as Node | null;
 				if (related === editor) return;
 				if (popup?.contains(related)) return;
+
+				if (debounceMs && isDirty) {
+					clearTimeout(timer);
+					dispatchChange();
+				} else {
+					this.submit();
+				}
+
 				return 'view';
 			},
 			popupFocusout: (e: FocusEvent) => {
 				if (anchor?.contains(e.relatedTarget as Node)) return;
+				this.submit();
 				return 'view';
 			},
 			popupKeydown(e: KeyboardEvent) {
@@ -393,13 +393,13 @@
 		readonly: {},
 		disabled: {},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, getCopyText());
 			},
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -410,13 +410,10 @@
 		if ($csm === 'editing') return;
 
 		const nextValue = Array.isArray(value) ? [...value] : value ? [value] : [];
-		const nextSerialized = JSON.stringify(nextValue);
 
-		if (nextSerialized !== JSON.stringify(localValue)) {
+		if (JSON.stringify(nextValue) !== JSON.stringify(localValue)) {
 			localValue = nextValue;
 		}
-
-		originalValue = nextSerialized;
 	});
 
 	$effect(() => {
@@ -462,12 +459,6 @@
 	});
 
 	$effect(() => {
-		if (!suggestions && config.optionsSource === 'custom') {
-			loadCustomOptions();
-		}
-	});
-
-	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
 		} else if (readonly && copyable && !isEmpty) {
@@ -502,24 +493,29 @@
 	{role}
 	{error}
 	{copyIcon}
+	{align}
 	multirow={true}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	{popupOpen}
 	{color}
 	{background}
 	{tabindex}
 >
-	<div class="value" class:placeholder={isEmpty && !inEdit}>
-		{#if isEmpty && !inEdit}
-			<span class="placeholder-text">{placeholder || 'Add some Tags'}</span>
-		{/if}
-
-		<div class="tags" style:justify-content={align ?? 'flex-start'}>
+	<div
+		class="value-contents"
+		class:placeholder={isEmpty && !inEdit && shouldShowCellViewChrome(role, inEdit)}
+	>
+		<div class="value">
+			<div class="tags" class:editing={inEdit} style:justify-content={align ?? 'flex-start'}>
+			{#if isEmpty && !inEdit && shouldShowCellViewChrome(role, inEdit)}
+				<span class="placeholder-text">
+					{resolveEmptyViewText(placeholder || 'Add some Tags', role, inEdit)}
+				</span>
+			{/if}
 			{#each localValue as tag, idx (tag)}
 				<div
 					class="tag"
-					style:--option-color={tagColors[tag] ||
-						OPTIONS_COLORS_ARRAY[idx % OPTIONS_COLORS_ARRAY.length]}
+					style:--option-color={tagColors[tag]}
 				>
 					<span class="tag-wrap">
 						<span>{tag}</span>
@@ -544,10 +540,11 @@
 					placeholder={isEmpty ? placeholder || 'Add tag...' : ''}
 					value={filterTerm}
 					on:input={handleEditorInput}
-					on:keydown={csm.keydown}
+					on:keydown={handleEditorKeydown}
 					on:focusout={csm.focusout}
 				/>
 			{/if}
+			</div>
 		</div>
 	</div>
 </BaseCell>
@@ -581,19 +578,13 @@
 					{#each displayOptions as option, idx (option)}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
-							class="option"
-							class:text={optionsViewMode === 'text'}
+							class="option text"
 							class:highlighted={focusIdx === idx}
 							style:--option-color={tagColors[option]}
 							on:mousedown|preventDefault={() => selectSuggestion(option)}
 							on:mouseenter={() => (focusIdx = idx)}
 						>
-							<span>
-								{#if optionsViewMode !== 'text'}
-									<i class="ri-checkbox-blank-fill"></i>
-								{/if}
-								{option}
-							</span>
+							<span>{option}</span>
 						</div>
 					{/each}
 					{#if $fetch?.loading}
@@ -615,26 +606,48 @@
 		overflow: hidden;
 	}
 
-	.value {
-		flex: 1 1 auto;
+	.value-contents {
+		font-size: 13px;
 		min-width: 0;
-		padding: 0.25rem 0.75rem;
-		outline: none;
+		max-width: 100%;
+		flex: 1 1 auto;
+		display: flex;
+		align-items: stretch;
+		width: 100%;
+		height: 100%;
+		padding: var(--super-cell-padding);
+		overflow: hidden;
 	}
 
-	.value.placeholder .placeholder-text {
+	.value {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		align-self: stretch;
+		overflow: hidden;
+	}
+
+	.value-contents.placeholder .placeholder-text {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.tags {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
+		align-content: flex-start;
 		gap: 0.5rem;
+		min-width: 0;
+		flex: 1 1 auto;
+		width: 100%;
 		max-height: 6rem;
 		overflow-y: auto;
 		box-sizing: border-box;
-		flex-wrap: wrap;
 	}
 
 	.tag {
@@ -651,6 +664,8 @@
 		text-transform: uppercase;
 		outline: none;
 		max-width: 7rem;
+		min-width: 0;
+		flex-shrink: 1;
 		transition: all 0.2s ease-in-out;
 	}
 
@@ -678,11 +693,11 @@
 	}
 
 	.tag-input {
-		flex: 1 1 4rem;
-		min-width: 4rem;
-		width: auto;
+		flex: 1 1 0;
+		min-width: 0;
+		width: 0;
 		height: 1.5rem;
-		padding: 0.125rem 0.25rem !important;
+		padding: 0 !important;
 		font-size: 12px;
 		background: transparent !important;
 		text-transform: none;
@@ -730,10 +745,5 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	.option > span > i {
-		font-size: 16px;
-		color: var(--option-color, var(--spectrum-global-color-gray-300));
 	}
 </style>

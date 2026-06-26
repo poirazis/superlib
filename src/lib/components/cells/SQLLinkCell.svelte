@@ -3,18 +3,29 @@
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
-	import SQLLinkPicker from './SQLLinkPicker.svelte';
-	import LinkPickerTree from './LinkPickerTree.svelte';
 	import { tooltip } from '../../actions/tooltip';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
-
-	interface SQLLinkItem {
-		primaryDisplay: string;
-		[key: string]: unknown;
-	}
+	import {
+		buildSqlPickerQuery,
+		clampFocusIdx,
+		PICKER_FETCH_MORE_INCREMENT,
+		PICKER_SEARCH_DEBOUNCE_MS,
+		schedulePickerFetchUpdate,
+		shouldFetchMore
+	} from './dropdownPickerHelpers';
+	import {
+		consumeOpenOnEnter,
+		copyAndTransition,
+		deferJustCopied,
+		linkSelectionEqual,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter,
+		resolveEmptyViewText,
+		shouldShowCellViewChrome
+	} from './helpers';
+	import type { SQLLinkItem } from './types';
 
 	const dispatch = createEventDispatcher();
-	const { API, fetchData, QueryUtils } = getContext('sdk');
+	const { API, fetchData, QueryUtils, Provider, ContextScopes } = getContext('sdk');
 	const EMPTY_FILTER = [];
 
 	let {
@@ -23,11 +34,12 @@
 		fieldSchema,
 		cellOptions = {},
 		filter = [],
-		limit = 100,
 		multi = false,
-		ownId: ownIdProp,
 		autofocus = false,
-		buttons = []
+		buttons = [],
+		renderSlot = false,
+		keepOpen = false,
+		children
 	} = $props();
 
 	let anchor = $state<HTMLElement | null>(null);
@@ -37,10 +49,10 @@
 	let pickerFetch = $state<ReturnType<typeof fetchData> | undefined>();
 	let pickerCurrentLimit = $state(15);
 	let pickerSearchTimer = $state<ReturnType<typeof setTimeout>>();
+	let changeTimer = $state<ReturnType<typeof setTimeout>>();
 	let focusIdx = $state(-1);
 	let open = $state(false);
 	let localValue = $state<SQLLinkItem[]>([]);
-	let originalValue = $state('[]');
 	let primaryDisplayField = $state<string | undefined>();
 	let isLoading = $state(false);
 	let enrichGeneration = 0;
@@ -51,38 +63,72 @@
 	let relatedTableId = $derived(fieldSchema?.tableId);
 	let pills = $derived(config.relViewMode === 'pills');
 	let plaintext = $derived(config.relViewMode === 'text' || !config.relViewMode);
-	let ownId = $derived(ownIdProp || config?.ownId);
 	let placeholder = $derived(config.placeholder || '');
 	let disabled = $derived(config.disabled);
 	let readonly = $derived(config.readonly);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
-	let role = $derived(config.role);
+	let role = $derived(config.role ?? 'form');
+	let inEdit = $derived($csm === 'editing');
 	let error = $derived(config.error);
 	let icon = $derived(config.icon);
 	let showDirty = $derived(config.showDirty);
-	let debounced = $derived(config.debounced);
+	let debounceMs = $derived(config.debounce ?? null);
+	let searchEnabled = $derived(config.search ?? true);
+	let isDirty = $derived(
+		inEdit && !linkSelectionEqual(localValue, value, relatedField)
+	);
 	let writable = $derived(!disabled && !readonly);
 	let isEmpty = $derived((localValue?.length ?? 0) < 1);
 	let tabindex = $state(0);
-	let showPopupSearch = $derived(fieldSchema?.recursiveTable ? !!config.search : true);
-	let isRecursiveTable = $derived(!!fieldSchema?.recursiveTable);
 	let relatedColumns = $derived(fieldSchema?.relatedColumns || []);
-	let pickerInitLimit = $derived(isRecursiveTable ? limit : 15);
+	let isMultiColumn = $derived(relatedColumns.length > 1);
+	let gridTemplate = $derived(
+		relatedColumns
+			.map((col: { width?: string }) => col.width || '1fr')
+			.concat('32px')
+			.join(' ')
+	);
+	let pickerInitLimit = 15;
+	let listElement = $state<HTMLElement | null>(null);
+	let optionRefs = $state<(HTMLElement | undefined)[]>([]);
 	let pickerPrimaryDisplay = $derived(
 		primaryDisplayField || $pickerFetch?.definition?.primaryDisplay || relatedField
 	);
-	let pickerIdColumn = $derived($pickerFetch?.definition?.primary?.[0] ?? '_id');
 	let pickerRows = $derived($pickerFetch?.rows ?? []);
 	let pickerLoading = $derived($pickerFetch?.loading ?? false);
 	let pickerLoaded = $derived($pickerFetch?.loaded ?? false);
+	let pickerHasMore = $derived(pickerRows.length >= pickerCurrentLimit);
+	let visibleFetchedRows = $derived(
+		pickerRows.filter((row) => !localValue.some((item) => item[relatedField] == row[relatedField]))
+	);
+	let totalPickerRows = $derived(localValue.length + visibleFetchedRows.length);
 
-	const getEmittedLabel = () => {
-		if (!localValue.length) return null;
-		return localValue.map((item) => item.primaryDisplay).join(', ');
+	const getCopyText = () => localValue.map((item) => item.primaryDisplay).join(', ');
+
+	const createPickerFetch = () => {
+		if (!relatedTableId || !writable) return;
+
+		pickerCurrentLimit = pickerInitLimit;
+		pickerFetch = fetchData({
+			API,
+			datasource: {
+				type: 'table',
+				tableId: relatedTableId
+			},
+			options: {
+				query: buildPickerQuery(''),
+				limit: pickerInitLimit
+			}
+		});
 	};
 
-	const parseRow = (row: Record<string, unknown>, displayField?: string): SQLLinkItem | null => {
+	const destroyPickerFetch = () => {
+		pickerFetch = undefined;
+		clearTimeout(pickerSearchTimer);
+	};
+
+	const parseRow = (row: Record<string, unknown>, displayField: string | undefined = undefined): SQLLinkItem | null => {
 		const rowId = row[relatedField];
 		if (rowId == null) return null;
 
@@ -194,51 +240,74 @@
 
 	const csm = fsm('view', {
 		'*': {
-			goTo: (state: string) => state
+			goTo: (state: string) => state,
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			focus: () => {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					requestOpenOnEnter();
+					return 'editing';
+				}
+			},
+			toggle: () => {
+				if (!readonly && !disabled) {
+					requestIconOpenOnEnter();
+					return 'editing';
+				}
 			}
 		},
 		editing: {
 			_enter: () => {
-				originalValue = JSON.stringify(localValue);
-				open = true;
+				localValue = toLocalValue(value);
+				open = keepOpen ? true : consumeOpenOnEnter();
 				focusIdx = -1;
-				pickerCurrentLimit = pickerInitLimit;
+				createPickerFetch();
 				dispatch('enteredit');
-				setTimeout(() => {
-					if (showPopupSearch) {
-						popupSearchInput?.focus();
-					}
-				}, 0);
+				if (!keepOpen && searchEnabled) {
+					setTimeout(() => popupSearchInput?.focus(), 0);
+				}
 			},
 			_exit: () => {
 				open = false;
 				popupSearchTerm = '';
 				focusIdx = -1;
-				clearTimeout(pickerSearchTimer);
+				destroyPickerFetch();
 				dispatch('exitedit');
-				if (!debounced) {
+			},
+			change() {
+				if (debounceMs) {
+					clearTimeout(changeTimer);
+					changeTimer = setTimeout(() => {
+						dispatch('change', localValue);
+					}, debounceMs);
+				}
+			},
+			submit() {
+				if (isDirty && !debounceMs) {
 					dispatch('change', localValue);
-					dispatch('labelChange', getEmittedLabel());
 				}
 			},
 			cancel() {
-				localValue = JSON.parse(originalValue);
+				clearTimeout(changeTimer);
+				localValue = toLocalValue(value);
 				open = false;
 				dispatch('cancel');
 				anchor?.focus();
 				return 'view';
 			},
-			click: () => {
+			toggle: () => {
 				open = !open;
+			},
+			click() {
+				this.toggle();
 			},
 			keydown: (e: KeyboardEvent) => {
 				if (e.key === ' ' || e.keyCode === 32) {
 					e.preventDefault();
-					open = !open;
+					this.toggle();
 				} else if (e.key === 'Escape') {
 					e.preventDefault();
 					if (open) {
@@ -247,17 +316,33 @@
 					} else {
 						return this.cancel();
 					}
-				} else if (open && showPopupSearch) {
-					popupSearchInput?.focus();
+				} else if (open) {
+					if (searchEnabled) {
+						popupSearchInput?.focus();
+					} else {
+						navigatePickerOptions(e);
+					}
 				}
 			},
 			focusout: (e: FocusEvent) => {
+				if (keepOpen) return;
+
 				const related = e.relatedTarget as Node | null;
 				if (popup?.contains(related)) return;
+
+				if (debounceMs && isDirty) {
+					clearTimeout(changeTimer);
+					dispatch('change', localValue);
+				} else {
+					csm.submit();
+				}
+
 				return 'view';
 			},
 			popupFocusout: (e: FocusEvent) => {
-				if (anchor?.contains(e.relatedTarget as Node)) return;
+				if (keepOpen) return;
+				if (e.relatedTarget === anchor) return;
+				csm.submit();
 				return 'view';
 			},
 			popupKeydown(e: KeyboardEvent) {
@@ -265,139 +350,119 @@
 					anchor?.focus();
 					return 'view';
 				}
-				if (!isRecursiveTable) {
-					navigatePickerOptions(e);
-				}
+				navigatePickerOptions(e);
 			},
 			selectChange: (nextValue: SQLLinkItem[]) => {
 				localValue = nextValue;
-
-				if (debounced) {
-					dispatch('change', localValue);
-					dispatch('labelChange', getEmittedLabel());
-				}
+				this.change();
 
 				if (!multi) {
+					if (keepOpen) return;
 					open = false;
+					popupSearchTerm = '';
+					focusIdx = -1;
 					anchor?.focus();
-					return 'view';
 				}
 			}
 		},
 		readonly: {},
 		disabled: {},
 		copyable: {
-			click() {
-				copyAndTransition(() => csm, getEmittedLabel() ?? '');
+			copy() {
+				copyAndTransition(() => csm, getCopyText());
 			},
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
 		justCopied: deferJustCopied(() => csm)
 	});
 
-	let isDirty = $derived($csm === 'editing' && originalValue !== JSON.stringify(localValue));
+	let dirty = $derived(config.dirty);
 
-	const handlePickerChange = (e: CustomEvent<SQLLinkItem[]>) => {
-		csm.selectChange(e.detail);
-	};
-
-	const extendQuery = (
-		baseQuery: Record<string, unknown>,
-		extensions: Record<string, unknown>
-	) => {
-		if (!Object.keys(extensions).length) {
-			return baseQuery;
-		}
-
-		const extended = {
-			$and: {
-				conditions: [...(baseQuery ? [baseQuery] : []), ...Object.values(extensions || {})]
-			},
-			onEmptyFilter: 'none'
-		};
-
-		return (extended.$and?.conditions?.length ?? 0) > 0 ? extended : {};
-	};
-
-	const buildPickerQuery = (term: string) => {
-		const defaultQuery = QueryUtils.buildQuery(resolvedFilter);
-
-		if (!term || !showPopupSearch) {
-			return defaultQuery;
-		}
-
-		if (relatedColumns.length > 0) {
-			return extendQuery(defaultQuery, {
-				search: {
-					$or: {
-						conditions: relatedColumns.map((col: { name: string }) => ({
-							fuzzy: {
-								[col.name]: term
-							}
-						}))
-					}
-				}
-			});
-		}
-
-		const displayField = primaryDisplayField || relatedField;
-
-		return extendQuery(defaultQuery, {
-			search: QueryUtils.buildQuery([
-				{
-					field: displayField,
-					type: 'string',
-					operator: 'fuzzy',
-					value: term,
-					valueType: 'Value'
-				}
-			])
-		});
-	};
+	const buildPickerQuery = (term: string) =>
+		buildSqlPickerQuery(
+			QueryUtils,
+			resolvedFilter,
+			relatedColumns,
+			relatedField,
+			primaryDisplayField,
+			term,
+			true
+		);
 
 	const schedulePickerSearch = (term: string) => {
-		if (!pickerFetch) return;
-
-		clearTimeout(pickerSearchTimer);
-		pickerSearchTimer = setTimeout(() => {
-			pickerCurrentLimit = pickerInitLimit;
-			pickerFetch?.update({
-				query: buildPickerQuery(term),
-				limit: pickerCurrentLimit
-			});
-		}, 200);
+		if (!searchEnabled) return;
+		schedulePickerFetchUpdate({
+			fetch: pickerFetch,
+			timer: pickerSearchTimer,
+			setTimer: (timer) => {
+				pickerSearchTimer = timer;
+			},
+			query: buildPickerQuery(term),
+			limit: pickerInitLimit,
+			debounceMs: PICKER_SEARCH_DEBOUNCE_MS,
+			onScheduled: () => {
+				pickerCurrentLimit = pickerInitLimit;
+			}
+		});
 	};
 
 	const fetchMorePickerRows = () => {
 		if ($pickerFetch?.loading) return;
 		if (($pickerFetch?.rows?.length ?? 0) < pickerCurrentLimit) return;
 
-		pickerCurrentLimit += 100;
+		pickerCurrentLimit += PICKER_FETCH_MORE_INCREMENT;
 		pickerFetch?.update({
-			query: buildPickerQuery(popupSearchTerm),
+			query: buildPickerQuery(searchEnabled ? popupSearchTerm : ''),
 			limit: pickerCurrentLimit
 		});
 	};
 
-	const selectPickerRow = (row: Record<string, unknown>) => {
-		const item = parseRow(row, pickerPrimaryDisplay);
-		if (!item) return;
+	const getRowContext = (row: Record<string, unknown>) => ({
+		value: row[relatedField],
+		label:
+			row.primaryDisplay ||
+			row[pickerPrimaryDisplay] ||
+			(relatedColumns[0] ? row[relatedColumns[0].name] : ''),
+		row
+	});
+
+	const rowSelected = (row: Record<string, unknown>) =>
+		localValue.some((item) => item[relatedField] == row[relatedField]);
+
+	const selectSqlRow = (row: Record<string, unknown>) => {
+		const displayValue =
+			relatedColumns.length > 0 ? row[relatedColumns[0].name] : row[pickerPrimaryDisplay];
+
+		const selectedItem = parseRow(
+			{
+				...row,
+				primaryDisplay: displayValue
+			},
+			pickerPrimaryDisplay
+		);
+		if (!selectedItem) return;
 
 		let nextValue: SQLLinkItem[];
 		if (!multi) {
-			nextValue = localValue[0]?.[relatedField] == item[relatedField] ? [] : [item];
+			nextValue = localValue[0]?.[relatedField] == selectedItem[relatedField] ? [] : [selectedItem];
 		} else {
-			const pos = localValue.findIndex((v) => v[relatedField] == item[relatedField]);
-			nextValue =
-				pos > -1 ? localValue.filter((_, i) => i !== pos) : [...localValue, item];
+			const pos = localValue.findIndex((v) => v[relatedField] == selectedItem[relatedField]);
+			nextValue = pos > -1 ? localValue.filter((_, i) => i !== pos) : [...localValue, selectedItem];
 		}
 
 		csm.selectChange(nextValue);
+	};
+
+	const handlePickerScroll = (e: Event) => {
+		const element = e.target as HTMLElement;
+		if (shouldFetchMore(element, pickerLoading, pickerHasMore)) {
+			fetchMorePickerRows();
+		}
 	};
 
 	const scrollHighlightedIntoView = async () => {
@@ -407,26 +472,28 @@
 		highlighted?.scrollIntoView({ block: 'nearest' });
 	};
 
-	const navigatePickerOptions = (e: KeyboardEvent) => {
-		const fetchedRows = $pickerFetch?.rows ?? [];
-		const totalRows = localValue.length + fetchedRows.length;
+	const getFocusedRow = () => {
+		if (focusIdx < 0) return null;
+		if (focusIdx < localValue.length) {
+			return localValue[focusIdx] as Record<string, unknown>;
+		}
+		return visibleFetchedRows[focusIdx - localValue.length] as Record<string, unknown> | undefined;
+	};
 
+	const navigatePickerOptions = (e: KeyboardEvent) => {
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			focusIdx = Math.min(focusIdx + 1, totalRows - 1);
-			if (focusIdx < 0 && totalRows) focusIdx = 0;
+			focusIdx = clampFocusIdx(focusIdx + 1, totalPickerRows);
+			if (focusIdx < 0 && totalPickerRows) focusIdx = 0;
 			scrollHighlightedIntoView();
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			focusIdx = Math.max(focusIdx - 1, 0);
+			focusIdx = clampFocusIdx(focusIdx - 1, totalPickerRows);
 			scrollHighlightedIntoView();
 		} else if (e.key === 'Enter' && focusIdx > -1) {
 			e.preventDefault();
-			const row =
-				focusIdx < localValue.length
-					? localValue[focusIdx]
-					: fetchedRows[focusIdx - localValue.length];
-			if (row) selectPickerRow(row as Record<string, unknown>);
+			const row = getFocusedRow();
+			if (row) selectSqlRow(row);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			open = false;
@@ -436,9 +503,7 @@
 
 	const handlePopupSearch = (e: Event) => {
 		popupSearchTerm = (e.target as HTMLInputElement).value;
-		const fetchedRows = $pickerFetch?.rows ?? [];
-		focusIdx =
-			popupSearchTerm && fetchedRows.length ? localValue.length : -1;
+		focusIdx = popupSearchTerm && visibleFetchedRows.length ? localValue.length : -1;
 		schedulePickerSearch(popupSearchTerm);
 	};
 
@@ -449,38 +514,28 @@
 	};
 
 	$effect(() => {
-		if ($csm !== 'editing' || !relatedTableId || !writable) {
-			pickerFetch = undefined;
-			return;
-		}
-
-		const initLimit = pickerInitLimit;
-		pickerCurrentLimit = initLimit;
-
-		untrack(() => {
-			pickerFetch = fetchData({
-				API,
-				datasource: {
-					type: 'table',
-					tableId: relatedTableId
-				},
-				options: {
-					query: buildPickerQuery(''),
-					limit: initLimit,
-					...(isRecursiveTable && config.sortColumn
-						? { sortColumn: config.sortColumn, sortOrder: config.sortOrder }
-						: {})
-				}
-			});
-		});
+		focusIdx = clampFocusIdx(focusIdx, totalPickerRows);
 	});
 
 	$effect(() => {
-		const fetchedRows = $pickerFetch?.rows ?? [];
-		const totalRows = localValue.length + fetchedRows.length;
-		if (totalRows) {
-			focusIdx = Math.min(focusIdx, totalRows - 1);
+		if (focusIdx >= 0 && optionRefs[focusIdx]) {
+			tick().then(() => {
+				optionRefs[focusIdx]?.scrollIntoView({ block: 'nearest' });
+			});
 		}
+	});
+
+	$effect(() => {
+		if (!pickerLoaded || pickerLoading || !pickerHasMore || !listElement) return;
+		if (pickerRows.length === 0) return;
+
+		void pickerRows.length;
+		tick().then(() => {
+			if (!listElement || pickerLoading || !pickerHasMore) return;
+			if (listElement.scrollHeight <= listElement.clientHeight) {
+				fetchMorePickerRows();
+			}
+		});
 	});
 
 	$effect(() => {
@@ -509,6 +564,11 @@
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
+		} else if (keepOpen) {
+			if ($csm !== 'editing') {
+				csm.goTo('editing');
+			}
+			open = true;
 		} else {
 			csm.goTo('view');
 		}
@@ -517,9 +577,7 @@
 	});
 
 	$effect(() => {
-		if (autofocus) {
-			setTimeout(() => csm.focus(), 50);
-		}
+		return () => clearTimeout(changeTimer);
 	});
 </script>
 
@@ -533,21 +591,26 @@
 	{role}
 	{error}
 	{icon}
-	isDirty={isDirty && showDirty}
-	popupOpen={open}
+	isDirty={dirty && showDirty}
+	popupOpen={open || keepOpen}
+	controlIcon={'ph ph-caret-down'}
 	{copyIcon}
 	{tabindex}
 	{buttons}
 >
 	{#key $csm}
-		<span class="value" class:placeholder={isEmpty}>
-			<div class="value-content" use:tooltip>
+		<div
+			class="value-contents"
+			class:placeholder={isEmpty && shouldShowCellViewChrome(role, inEdit)}
+			use:tooltip
+		>
+			<div class="value">
 				{#if isLoading}
 					Loading...
 				{:else}
 					{#key localValue}
 						{#if isEmpty}
-							{placeholder || 'Select...'}
+							{resolveEmptyViewText(placeholder || 'Select...', role, inEdit)}
 						{:else if plaintext}
 							{#if role === 'form' && localValue.length > 1}
 								({localValue.length})
@@ -572,22 +635,17 @@
 					{/key}
 				{/if}
 			</div>
-		</span>
-
-		{#if $csm === 'view' || $csm === 'editing'}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
-		{/if}
+		</div>
 	{/key}
 </BaseCell>
 
 {#if $csm === 'editing'}
 	<SuperPopover
 		{anchor}
-		{open}
+		open={open || keepOpen}
 		useAnchorWidth={true}
 		minWidth={config.pickerWidth || undefined}
-		align="left"
+		align={config.pickerAlign ?? 'left'}
 		dismissible={false}
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -598,7 +656,7 @@
 			on:focusout={csm.popupFocusout}
 			on:keydown={csm.popupKeydown}
 		>
-			{#if showPopupSearch}
+			{#if searchEnabled}
 				<div class="popup-search">
 					<i class="ph ph-magnifying-glass"></i>
 					<input
@@ -611,92 +669,191 @@
 						use:focus
 						on:input={handlePopupSearch}
 					/>
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<i
-						class="ph ph-x clear-icon"
-						on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
-					></i>
+					{#if popupSearchTerm}
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<i class="ph ph-x clear-icon" on:mousedown|preventDefault|stopPropagation={clearPopupSearch}
+						></i>
+					{/if}
 				</div>
 			{/if}
-			{#if isRecursiveTable}
-				{#key `${pickerLoaded}-${pickerRows.length}`}
-					<LinkPickerTree
-						{fieldSchema}
-						rows={pickerRows}
-						loading={pickerLoading}
-						loaded={pickerLoaded}
-						primaryDisplay={pickerPrimaryDisplay}
-						idColumn={pickerIdColumn}
-						joinColumn={config.joinColumn}
-						value={localValue}
-						{ownId}
-						{multi}
-						on:change={handlePickerChange}
-					/>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
+
+			<div
+				class="picker-list"
+				bind:this={listElement}
+				on:scroll={handlePickerScroll}
+				on:mousedown|preventDefault={() => {}}
+			>
+				{#key pickerRows}
+					{#if isMultiColumn}
+						<div class="grid-container" style="--grid-template: {gridTemplate}">
+							<div class="header-row">
+								{#each relatedColumns as col}
+									<div class="header-cell">{col.displayName || col.name}</div>
+								{/each}
+								<div class="header-cell check"></div>
+							</div>
+							{#each localValue as row, idx (row[relatedField])}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="data-row"
+									class:selected={rowSelected(row)}
+									class:highlighted={focusIdx === idx}
+									bind:this={optionRefs[idx]}
+									on:mouseenter={() => (focusIdx = idx)}
+									on:mousedown|preventDefault={() => selectSqlRow(row)}
+								>
+									{#if renderSlot}
+										<div class="data-cell slot-cell">
+											<Provider data={getRowContext(row)} scope={ContextScopes.Local}>
+												{@render children?.()}
+											</Provider>
+										</div>
+									{:else}
+										{#each relatedColumns as col}
+											<div class="data-cell">{row[col.name] || ''}</div>
+										{/each}
+										<div class="data-cell check"><i class="ri-check-line"></i></div>
+									{/if}
+								</div>
+							{/each}
+							{#if !pickerLoaded}
+								<div class="data-row loading">
+									<div class="data-cell" style="grid-column: 1 / -1;">
+										<i class="ph ph-spinner spin"></i> Loading...
+									</div>
+								</div>
+							{:else if visibleFetchedRows.length}
+								{#each visibleFetchedRows as row, idx (row[relatedField])}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="data-row"
+										class:highlighted={focusIdx === idx + localValue.length}
+										bind:this={optionRefs[idx + localValue.length]}
+										on:mouseenter={() => (focusIdx = idx + localValue.length)}
+										on:mousedown|preventDefault={() => selectSqlRow(row)}
+									>
+										{#if renderSlot}
+											<div class="data-cell slot-cell">
+												<Provider data={getRowContext(row)} scope={ContextScopes.Local}>
+													{@render children?.()}
+												</Provider>
+											</div>
+										{:else}
+											{#each relatedColumns as col}
+												<div class="data-cell">{row[col.name] || ''}</div>
+											{/each}
+											<div class="data-cell check"><i class="ri-check-line"></i></div>
+										{/if}
+									</div>
+								{/each}
+								{#if pickerLoading && pickerLoaded}
+									<div class="data-row loading">
+										<div class="data-cell" style="grid-column: 1 / -1;">
+											<i class="ph ph-spinner spin"></i> Loading more...
+										</div>
+									</div>
+								{/if}
+							{:else if !localValue.length}
+								<div class="data-row">
+									<div class="data-cell" style="grid-column: 1 / -1;">No Results Found</div>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="options">
+							{#each localValue as row, idx (row[relatedField])}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="option"
+									class:selected={rowSelected(row)}
+									class:highlighted={focusIdx === idx}
+									bind:this={optionRefs[idx]}
+									on:mouseenter={() => (focusIdx = idx)}
+									on:mousedown|preventDefault={() => selectSqlRow(row)}
+								>
+									{#if renderSlot}
+										<Provider data={getRowContext(row)} scope={ContextScopes.Local}>
+											{@render children?.()}
+										</Provider>
+									{:else}
+										<span>{row.primaryDisplay || row[pickerPrimaryDisplay]}</span>
+										<i class="ri-check-line"></i>
+									{/if}
+								</div>
+							{/each}
+							{#if !relatedTableId}
+								<div class="option">Configure a related table</div>
+							{:else if !pickerLoaded}
+								<div class="option loading">
+									<i class="ph ph-spinner spin"></i>
+									Loading...
+								</div>
+							{:else if visibleFetchedRows.length}
+								{#each visibleFetchedRows as row, idx (row[relatedField])}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="option"
+										class:highlighted={focusIdx === idx + localValue.length}
+										bind:this={optionRefs[idx + localValue.length]}
+										on:mouseenter={() => (focusIdx = idx + localValue.length)}
+										on:mousedown|preventDefault={() => selectSqlRow(row)}
+									>
+										{#if renderSlot}
+											<Provider data={getRowContext(row)} scope={ContextScopes.Local}>
+												{@render children?.()}
+											</Provider>
+										{:else}
+											<span>{row.primaryDisplay || row[pickerPrimaryDisplay]}</span>
+											<i class="ri-check-line"></i>
+										{/if}
+									</div>
+								{/each}
+								{#if pickerLoading && pickerLoaded}
+									<div class="option loading">
+										<i class="ph ph-spinner spin"></i>
+										Loading more...
+									</div>
+								{/if}
+							{:else if !localValue.length}
+								<div class="option">No Results Found</div>
+							{/if}
+						</div>
+					{/if}
 				{/key}
-			{:else}
-				{#key `${pickerLoaded}-${pickerRows.length}`}
-					<SQLLinkPicker
-						{fieldSchema}
-						rows={pickerRows}
-						loading={pickerLoading}
-						loaded={pickerLoaded}
-						primaryDisplay={pickerPrimaryDisplay}
-						{multi}
-						value={localValue}
-						bind:focusIdx
-						on:change={handlePickerChange}
-						on:fetchmore={fetchMorePickerRows}
-					></SQLLinkPicker>
-				{/key}
-			{/if}
+			</div>
 		</div>
 	</SuperPopover>
 {/if}
 
 <style>
-	span.value {
+	.value-contents {
+		font-size: 13px;
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
 		display: flex;
-		align-items: stretch;
+		align-items: center;
 		height: 100%;
 		background: transparent;
 		color: inherit;
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		padding: var(--super-cell-padding);
 	}
 
-	span.value:has(.items) {
-		white-space: normal;
-	}
-
-	.value-content {
-		min-width: 0;
-		flex: 1;
-		font-style: inherit;
-		font-size: 13px;
-		text-overflow: ellipsis;
-		overflow: hidden;
-		white-space: nowrap;
-		display: flex;
-		align-items: center;
-	}
-
-	.value-content:has(.items) {
-		white-space: normal;
-		display: flex;
-	}
-
-	.value.placeholder .value-content {
+	.value-contents.placeholder {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
+	}
+
+	.value {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.items {
@@ -753,7 +910,8 @@
 		align-items: center;
 		gap: 0.25rem;
 		flex-shrink: 0;
-		padding: 0rem 0.75rem;
+		min-width: 0;
+		padding: 0rem 0.25rem 0rem 0.75rem;
 	}
 
 	.popup-search > i {
@@ -774,6 +932,7 @@
 
 	.popup-search > input {
 		flex: 1;
+		min-width: 0;
 		height: 100%;
 		max-width: 100%;
 		outline: none;
@@ -788,5 +947,146 @@
 	.popup-search > input.placeholder {
 		font-style: italic;
 		color: var(--spectrum-global-color-gray-600);
+	}
+
+	.picker-list {
+		max-height: 300px;
+		overflow-y: auto;
+		overflow-x: hidden;
+	}
+
+	.options {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.option {
+		line-height: 1.5rem;
+		padding: 0.5em 1em;
+		overflow: hidden;
+		display: flex;
+		min-width: 0;
+		justify-content: space-between;
+		cursor: pointer;
+	}
+
+	.option > i {
+		visibility: hidden;
+	}
+
+	.option > span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		flex: 1;
+	}
+
+	.option.selected > i {
+		visibility: visible;
+		color: var(--spectrum-global-color-green-500);
+	}
+
+	.option.highlighted {
+		background-color: var(--spectrum-global-color-gray-100);
+	}
+
+	.option:hover {
+		background-color: var(--spectrum-global-color-gray-100);
+	}
+
+	.option.loading {
+		justify-content: center;
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic;
+	}
+
+	.grid-container {
+		min-width: 0;
+	}
+
+	.header-row {
+		position: sticky;
+		top: 0;
+		background-color: var(--spectrum-global-color-gray-100);
+		z-index: 1;
+		display: grid;
+		grid-template-columns: var(--grid-template);
+		height: 1.75rem;
+	}
+
+	.data-row {
+		display: grid;
+		grid-template-columns: var(--grid-template);
+		cursor: pointer;
+	}
+
+	.header-cell {
+		padding: 0.15rem 0.5rem;
+		text-align: left;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-300);
+		font-weight: bold;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: flex;
+		align-items: center;
+	}
+
+	.header-cell.check {
+		text-align: center;
+	}
+
+	.data-cell {
+		padding: 0.25rem 0.5rem;
+		border-bottom: 1px solid var(--spectrum-global-color-gray-200);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.data-cell.check {
+		text-align: center;
+	}
+
+	.data-row:hover,
+	.data-row.highlighted {
+		background-color: var(--spectrum-global-color-gray-100);
+	}
+
+	.data-row.selected .data-cell.check i {
+		visibility: visible;
+		color: var(--spectrum-global-color-green-500);
+	}
+
+	.data-cell.check i {
+		visibility: hidden;
+	}
+
+	.data-cell.slot-cell {
+		grid-column: 1 / -1;
+	}
+
+	.data-row.loading {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic;
+	}
+
+	.data-row.loading .data-cell {
+		text-align: center;
+		border-bottom: none;
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		from {
+			transform: rotate(0deg);
+		}
+		to {
+			transform: rotate(360deg);
+		}
 	}
 </style>

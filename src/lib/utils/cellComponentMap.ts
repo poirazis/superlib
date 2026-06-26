@@ -1,12 +1,14 @@
 import type { Component } from 'svelte';
 import StringCell from '../components/cells/StringCell.svelte';
 import NumberCell from '../components/cells/NumberCell.svelte';
-import AdvancedOptionsCell from '../components/cells/AdvancedOptionsCell.svelte';
+import BaseDropdownCell from '../components/cells/BaseDropdownCell.svelte';
 import BooleanCell from '../components/cells/BooleanCell.svelte';
 import DatetimeCell from '../components/cells/DatetimeCell.svelte';
 import LinkCell from '../components/cells/LinkCell.svelte';
 import JSONCell from '../components/cells/JSONCell.svelte';
 import AttachmentCell from '../components/cells/AttachmentCell.svelte';
+import AttachmentsCell from '../components/cells/AttachmentsCell.svelte';
+import BaseTableCell from '../components/cells/BaseTableCell.svelte';
 
 type SchemaLike = { type?: string } | undefined;
 
@@ -15,15 +17,15 @@ export const cellComponents: Record<string, Component> = {
 	longform: StringCell,
 	number: NumberCell,
 	bigint: NumberCell,
-	options: AdvancedOptionsCell,
-	array: AdvancedOptionsCell,
-	jsonarray: AdvancedOptionsCell,
+	options: BaseDropdownCell,
+	array: BaseDropdownCell,
+	jsonarray: BaseDropdownCell,
 	boolean: BooleanCell,
 	datetime: DatetimeCell,
 	link: LinkCell,
 	json: JSONCell,
 	attachment_single: AttachmentCell,
-	attachment: AttachmentCell,
+	attachment: AttachmentsCell,
 	bb_reference_single: LinkCell,
 	bb_reference: LinkCell
 };
@@ -32,9 +34,9 @@ export const headerComponents: Record<string, Component | null> = {
 	string: StringCell,
 	number: NumberCell,
 	bigint: NumberCell,
-	options: AdvancedOptionsCell,
-	array: AdvancedOptionsCell,
-	jsonarray: AdvancedOptionsCell,
+	options: BaseDropdownCell,
+	array: BaseDropdownCell,
+	jsonarray: BaseDropdownCell,
 	boolean: BooleanCell,
 	datetime: DatetimeCell,
 	link: StringCell,
@@ -47,49 +49,16 @@ export const headerComponents: Record<string, Component | null> = {
 
 export function getCellComponent(
 	columnSchema: SchemaLike,
-	canEdit = true
+	canEdit = true,
+	isEditing = false
 ): Component {
+	if (!canEdit || !isEditing) return BaseTableCell;
+
 	const type = columnSchema?.type ?? 'string';
-	const comp = cellComponents[type] ?? StringCell;
-	if (comp === StringCell && !canEdit) return StringCell;
-	return comp;
+	return cellComponents[type] ?? StringCell;
 }
 
 export function getHeaderComponent(columnSchema: SchemaLike): Component {
 	const type = columnSchema?.type ?? 'string';
 	return headerComponents[type] ?? StringCell;
-}
-
-export function buildRowCellOptions(columnOptions: Record<string, unknown>) {
-	return {
-		role: 'tableCell',
-		showDirty: true,
-		readonly: !columnOptions.canEdit,
-		align: columnOptions.align,
-		template: columnOptions.template,
-		optionsViewMode: columnOptions.optionsViewMode,
-		relViewMode: columnOptions.relViewMode,
-		padding: columnOptions.isFirst ? '1rem' : '0.5rem',
-		background: columnOptions.background,
-		color: columnOptions.color,
-		controlType: 'checkbox'
-	};
-}
-
-export function buildHeaderCellOptions(columnOptions: Record<string, unknown>) {
-	return {
-		align: columnOptions.align,
-		color: columnOptions.color,
-		background: 'var(--spectrum-global-color-gray-50)',
-		fontWeight: columnOptions.fontWeight,
-		padding: columnOptions.cellPadding,
-		placeholder: columnOptions.defaultFilteringOperator,
-		clearValueIcon: true,
-		optionsViewMode: 'text',
-		optionsSource: 'schema',
-		debounce: 250,
-		controlType: 'select',
-		initialState: 'Editing',
-		role: 'inlineInput'
-	};
 }

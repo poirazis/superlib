@@ -66,6 +66,35 @@ export const supportSortingMap: Record<string, boolean> = {
 	bigint: true
 };
 
+type FilterOperatorOption = { label: string; value: string };
+
+type QueryUtilsFilterLike = {
+	getValidOperatorsForType: (fieldType: { type?: string }) => FilterOperatorOption[];
+};
+
+export function resolveColumnFilterOptions(
+	type: string | undefined,
+	QueryUtils: QueryUtilsFilterLike
+) {
+	const fieldType = type ?? 'string';
+
+	return {
+		filteringOperators: QueryUtils.getValidOperatorsForType({ type: fieldType }),
+		defaultFilteringOperator: defaultOperatorMap[fieldType] ?? defaultOperatorMap.string
+	};
+}
+
+const TABLE_OPTION_FIELD_TYPES = new Set(['options', 'array', 'jsonarray']);
+const TABLE_RELATIONSHIP_FIELD_TYPES = new Set(['link', 'bb_reference', 'bb_reference_single']);
+
+/** Inline table edit: option columns hide picker search; relationship columns keep it. */
+export function resolveTableCellSearch(type?: string): boolean | undefined {
+	if (!type) return undefined;
+	if (TABLE_OPTION_FIELD_TYPES.has(type)) return false;
+	if (TABLE_RELATIONSHIP_FIELD_TYPES.has(type)) return true;
+	return undefined;
+}
+
 export const supportEditingMap: Record<string, boolean> = {
 	string: true,
 	longform: true,

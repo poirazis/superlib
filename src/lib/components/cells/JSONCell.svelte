@@ -4,7 +4,16 @@
 	import BaseCell from './BaseCell.svelte';
 	import SuperPopover from '../SuperPopover/SuperPopover.svelte';
 	import { tooltip } from '../../actions/tooltip';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		consumeOpenOnEnter,
+		copyAndTransition,
+		deferJustCopied,
+		isTableCellRole,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter,
+		resolveEmptyViewText,
+		shouldShowCellViewChrome
+	} from './helpers';
 
 	const dispatch = createEventDispatcher();
 	const { processStringSync } = getContext('sdk');
@@ -16,12 +25,12 @@
 			role: 'form',
 			debounce: 250
 		},
-		autofocus = false
+		autofocus = false,
+		buttons = []
 	} = $props();
 
 	let timer = $state<ReturnType<typeof setTimeout>>();
 	let localValue = $state<string | null>(null);
-	let originalValue = $state<string | null>(null);
 	let errors = $state<string[]>([]);
 	let anchor = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | HTMLTextAreaElement | null>(null);
@@ -45,12 +54,12 @@
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
-	let debounceDelay = $derived(config.debounce);
+	let debounceMs = $derived(config.debounce ?? null);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let placeholder = $derived(config.placeholder);
 	let popupHeight = $derived(config.popupHeight ?? 280);
-	let baseRole = $derived(config.role === 'inline' ? 'inline' : 'form');
+	let baseRole = $derived(config.role ?? 'form');
 
 	const validateJson = (input: unknown) => {
 		if (input === null || input === undefined || input === '') return true;
@@ -109,11 +118,12 @@
 
 	let error = $derived(optionError || errors.length > 0 || !isValidJson);
 	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(inEdit && localValue !== normalizedValue);
 	let isEmpty = $derived(!formattedValue && formattedValue !== '0');
-	let isDirty = $derived(inEdit && localValue !== originalValue);
+	let dirty = $derived(config.dirty);
 	let clearable = $derived(
 		config.clearValue === true &&
-			config.role !== 'inline' &&
+			!isTableCellRole(config.role) &&
 			inEdit &&
 			localValue != null &&
 			localValue !== ''
@@ -124,19 +134,12 @@
 		dispatch('labelChange', nextValue);
 	};
 
-	const applyInput = (newValue: string) => {
-		isValidJson = validateJson(newValue);
-		localValue = newValue;
-
-		if (debounceDelay && isValidJson) {
-			clearTimeout(timer);
-			timer = setTimeout(() => emitChange(localValue), debounceDelay);
-		}
-	};
-
 	const csm = fsm('view', {
 		'*': {
-			goTo: (state: string) => state
+			goTo: (state: string) => state,
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {
@@ -144,10 +147,16 @@
 				isValidJson = validateJson(normalizedValue);
 			},
 			focus() {
-				if (!readonly && !disabled) return 'editing';
+				if (!readonly && !disabled) {
+					if (isPopup) requestOpenOnEnter();
+					return 'editing';
+				}
 			},
-			click() {
-				if (!readonly && !disabled) return 'editing';
+			toggle() {
+				if (!readonly && !disabled) {
+					if (isPopup) requestIconOpenOnEnter();
+					return 'editing';
+				}
 			}
 		},
 		readonly: {
@@ -159,13 +168,13 @@
 			_enter() {
 				localValue = normalizedValue;
 			},
-			click() {
+			copy() {
 				copyAndTransition(() => csm, String(displayValue ?? ''));
 			},
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -177,10 +186,9 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = normalizedValue;
 				localValue = normalizedValue;
 				isValidJson = validateJson(normalizedValue);
-				open = isPopup;
+				open = isPopup && consumeOpenOnEnter();
 				dispatch('enteredit');
 				setTimeout(() => editor?.focus(), isPopup ? 0 : 50);
 			},
@@ -188,25 +196,27 @@
 				open = false;
 				dispatch('exitedit');
 			},
-			click() {
-				if (isPopup) {
-					open = !open;
-					if (open) {
-						setTimeout(() => editor?.focus(), 0);
-					}
+			toggle() {
+				if (!isPopup) return;
+
+				open = !open;
+				if (open) {
+					setTimeout(() => editor?.focus(), 0);
 				}
+			},
+			click() {
+				this.toggle();
 			},
 			clear() {
 				localValue = null;
 				isValidJson = true;
-				if (debounceDelay) {
+				if (debounceMs) {
 					emitChange(null);
 				}
 				dispatch('clear', null);
 			},
 			focusout(e: FocusEvent) {
-				if (!isPopup) return;
-				if (popup?.contains(e.relatedTarget as Node)) return;
+				if (isPopup && popup?.contains(e.relatedTarget as Node)) return;
 				this.submit();
 			},
 			popupFocusout(e: FocusEvent) {
@@ -220,22 +230,32 @@
 					return this.submit();
 				}
 			},
+			change(e: Event) {
+				const newValue = (e.target as HTMLInputElement | HTMLTextAreaElement).value;
+				isValidJson = validateJson(newValue);
+				localValue = newValue;
+
+				if (debounceMs && isValidJson) {
+					clearTimeout(timer);
+					timer = setTimeout(() => emitChange(localValue), debounceMs);
+				}
+			},
 			submit() {
+				clearTimeout(timer);
 				if (isDirty && isValidJson) {
 					emitChange(localValue);
 				}
 				return 'view';
 			},
 			cancel() {
-				localValue = originalValue;
-				isValidJson = validateJson(originalValue);
+				clearTimeout(timer);
+				localValue = normalizedValue;
+				isValidJson = validateJson(normalizedValue);
 				open = false;
 				dispatch('cancel');
 				return 'view';
 			},
-			debounce(e: Event) {
-				applyInput((e.target as HTMLInputElement | HTMLTextAreaElement).value);
-			},
+
 			keydown(e: KeyboardEvent) {
 				const target = e.target as HTMLElement | null;
 				const typingInEditor =
@@ -262,8 +282,7 @@
 					!typingInEditor
 				) {
 					e.preventDefault();
-					open = !open;
-					if (open) setTimeout(() => editor?.focus(), 0);
+					this.toggle();
 				}
 			}
 		}
@@ -311,14 +330,17 @@
 	bind:anchor
 	{icon}
 	multirow={isMultiline}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	{clearable}
 	{error}
 	{copyIcon}
+	align={config.align}
 	{color}
 	{background}
 	popupOpen={isPopup ? open : undefined}
+	controlIcon={isPopup ? 'ph ph-arrows-out-simple' : undefined}
 	{tabindex}
+	{buttons}
 >
 	{#key $csm}
 		{#if inEdit && isInline}
@@ -329,7 +351,7 @@
 					class:placeholder={!localValue && !formattedValue}
 					placeholder={placeholder ?? ''}
 					value={editValue}
-					on:input={csm.debounce}
+					on:input={csm.change}
 					on:focusout={csm.focusout}
 					on:keydown={csm.keydown}
 				></textarea>
@@ -341,22 +363,22 @@
 					value={localValue ?? ''}
 					placeholder={placeholder ?? ''}
 					style:text-align={config.align}
-					on:input={csm.debounce}
+					on:input={csm.change}
 					on:focusout={csm.focusout}
 					on:keydown={csm.keydown}
 				/>
 			{/if}
 		{:else}
-			<span class="value" class:placeholder={isEmpty}>
+			<div
+				class="value-contents"
+				class:placeholder={isEmpty && shouldShowCellViewChrome(baseRole, inEdit)}
+				class:textarea={isMultiline}
+			>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="value-content" class:json-preview={isPopup} use:tooltip>
-					{isEmpty ? placeholder : displayValue}
+				<div class="value" class:json-preview={isPopup} use:tooltip>
+					{isEmpty ? resolveEmptyViewText(placeholder, baseRole, inEdit) : displayValue}
 				</div>
-			</span>
-			{#if isPopup && ($csm === 'view' || inEdit)}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<i class="ph ph-arrows-out-simple control-icon" on:click|self={csm.click}></i>
-			{/if}
+			</div>
 		{/if}
 	{/key}
 </BaseCell>
@@ -393,7 +415,7 @@
 				class:invalid={!isValidJson}
 				placeholder={placeholder ?? 'Enter JSON'}
 				value={editValue}
-				on:input={csm.debounce}
+				on:input={csm.change}
 				on:keydown={csm.keydown}
 			></textarea>
 			</div>
@@ -408,45 +430,62 @@
 		overflow: hidden;
 	}
 
-	span.value {
+	.value-contents {
+		font-size: 13px;
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
 		display: flex;
-		align-items: stretch;
+		align-items: center;
 		height: 100%;
 		background: transparent;
 		color: inherit;
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
 		overflow: hidden;
+		padding: var(--super-cell-padding);
 	}
 
-	.value-content {
-		min-width: 0;
+	.value-contents.placeholder {
+		color: var(--spectrum-global-color-gray-500);
+		font-style: italic !important;
+	}
+
+	.value {
 		flex: 1;
-		font-style: inherit;
-		font-size: 13px;
-		text-overflow: ellipsis;
 		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: nowrap;
+		font-style: inherit;
 	}
 
-	.value-content.json-preview {
+	.value.json-preview {
 		font-family: monospace;
 	}
 
-	.value.placeholder .value-content {
-		color: var(--spectrum-global-color-gray-500);
-		font-style: italic !important;
+	.value-contents.textarea {
+		align-items: flex-start;
+		align-self: stretch;
+		height: auto;
+		min-height: 100%;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+		overflow: auto;
+	}
+
+	.value-contents.textarea .value {
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+		text-overflow: unset;
 	}
 
 	:global(.super-cell > textarea.json-editor) {
 		font-family: monospace;
 		white-space: pre-wrap;
 		overflow-wrap: break-word;
+		min-width: 0;
+		max-width: 100%;
 		min-height: 8rem;
 		overflow-y: auto;
 		resize: vertical;

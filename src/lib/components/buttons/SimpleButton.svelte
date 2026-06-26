@@ -11,12 +11,13 @@
 		color = undefined,
 		icon = undefined,
 		label = '',
-		fieldbutton = false
+		fieldbutton = false,
+		variant = 'default'
 	} = $props();
 
-	function handleSelect() {
+	function handleClick() {
 		if (disabled || viewMode) return;
-		dispatch('select');
+		dispatch('click');
 	}
 </script>
 
@@ -30,8 +31,9 @@
 	class:icon-only={iconOnly}
 	class:view-mode={viewMode}
 	class:field-button={fieldbutton}
+	class:warning={variant === 'warning'}
 	style:--option-color={color}
-	on:click={handleSelect}
+	on:click={handleClick}
 >
 	{#if icon}
 		<i class={icon}></i>
@@ -96,6 +98,33 @@
 		background-color: var(--option-color, var(--spectrum-global-color-gray-200));
 		border-color: var(--spectrum-global-color-gray-400);
 		color: var(--spectrum-global-color-gray-800);
+		font-weight: 600;
+	}
+
+	.simple-button.warning {
+		border: 1px solid transparent;
+		background-color: var(--spectrum-global-color-red-400);
+		color: white;
+	}
+
+	.simple-button.warning:hover:not(.disabled):not(.view-mode) {
+		background-color: var(--spectrum-global-color-red-700);
+		border-color: transparent;
+		color: white;
+		font-weight: 600;
+	}
+
+	.simple-button.warning:active:not(.disabled):not(.view-mode) {
+		border: 1px dashed var(--spectrum-global-color-red-700);
+		background-color: var(--spectrum-global-color-red-700);
+		color: white;
+		font-weight: 600;
+	}
+
+	.simple-button.warning.selected {
+		background-color: var(--spectrum-global-color-red-400);
+		border-color: var(--spectrum-global-color-red-700);
+		color: white;
 		font-weight: 600;
 	}
 

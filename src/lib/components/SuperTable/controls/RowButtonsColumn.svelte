@@ -1,59 +1,52 @@
-<svelte:options runes={false} />
-
 <script>
   import { getContext } from "svelte";
   import SuperPopover from "../../SuperPopover/SuperPopover.svelte";
-  import SuperButton from "../../Button.svelte";
+  import SuperButton from "../../buttons/SuperButton.svelte";
+  import {
+    configuredButtonKey,
+    splitRowMenuButtons,
+  } from "../../../utils/buttonConditions.ts";
 
-  const stbSettings = getContext("stbSettings");
-  const stbState = getContext("stbState");
-  const stbHorizontalScrollPos = getContext("stbHorizontalScrollPos");
-  const stbHovered = getContext("stbHovered");
-  const stbEditing = getContext("stbEditing");
-  const stbMenuID = getContext("stbMenuID");
-  const rowMetadata = getContext("stbRowMetadata");
-  const stbVisibleRows = getContext("stbVisibleRows");
-  const data = getContext("data");
+	let {
+		right,
+		rowMenu,
+		rowMenuItems,
+		menuItemsVisible = 1,
+		canScroll,
+		stbSettings,
+		stbState,
+		tableAPI,
+		rowState,
+		rows = [],
+		visibleRows = [],
+		horizontalScrollPos = 0,
+	} = $props();
 
-  const stbAPI = getContext("stbAPI");
+	const getStbSelected = getContext("stbSelected");
 
-  const allContext = getContext("context");
+  let menuAnchor = $state();
+  let openMenu = $state(false);
 
-  export let right;
-  export let rowMenu;
-  export let rowMenuItems;
-  export let menuItemsVisible = 0;
-  export let canScroll;
+  let quiet = $derived(stbSettings.appearance?.quiet);
+  let menuIcon = $derived(stbSettings.rowMenuIcon);
+  let sticky = $derived(horizontalScrollPos > 0 && !right);
+  let inInsert = $derived($stbState == "Inserting");
 
-  let menuAnchor;
-  let openMenu;
-
-  $: quiet = $stbSettings.appearance.quiet;
-  $: menuIcon = $stbSettings.rowMenuIcon;
-  $: sticky = $stbHorizontalScrollPos > 0 && !right;
-  $: inInsert = $stbState == "Inserting";
-
-  $: inlineButtons =
-    menuItemsVisible < rowMenuItems?.length
-      ? rowMenuItems.slice(0, menuItemsVisible)
-      : rowMenuItems;
-
-  $: menuItems =
-    menuItemsVisible < rowMenuItems?.length
-      ? rowMenuItems.slice(menuItemsVisible, rowMenuItems.length)
-      : [];
+  let rowMenuSplit = $derived(
+    splitRowMenuButtons(rowMenuItems, menuItemsVisible),
+  );
+  let inlineButtons = $derived(rowMenuSplit.inlineButtons);
+  let menuItems = $derived(rowMenuSplit.overflowButtons);
 
   const handleMenu = (e, index) => {
     menuAnchor = e.target;
     openMenu = !openMenu;
-    $stbMenuID = openMenu ? index : -1;
+    rowState.menuRow = openMenu ? index : -1;
   };
 </script>
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<!-- svelte-ignore a11y-click-events-have-key-events -->
 <div class="super-column" class:right class:sticky style:flex="none">
-  {#if $stbSettings.showHeader}
+  {#if stbSettings.showHeader}
     <div class="super-column-header"><span> </span></div>
   {/if}
 
@@ -68,43 +61,37 @@
       : null}
     class:quiet
     class:sticky
-    class:zebra={$stbSettings.appearance.zebraColors}
   >
-    {#each $stbVisibleRows as visibleRow}
+    {#each visibleRows as visibleRow}
+      {@const row = rows[visibleRow]}
+      {@const meta = row?.__meta}
+      {@const rowButtons = tableAPI.resolveRowButtons(inlineButtons, row, {
+        forceDisabled:
+          inInsert || rowState.editing == visibleRow || meta?.disabled,
+      })}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore event_directive_deprecated -->
       <div
         class="super-row"
-        on:mouseenter={() => ($stbHovered = visibleRow)}
-        on:mouseleave={() => ($stbHovered = null)}
-        class:selected={$rowMetadata[visibleRow].selected}
-        class:hovered={$stbHovered == visibleRow || $stbMenuID == visibleRow}
-        class:is-editing={$stbEditing == visibleRow}
-        class:disabled={$rowMetadata[visibleRow].disabled}
-        style:height={$rowMetadata[visibleRow].height + "px"}
+        on:mouseenter={() => (rowState.hovered = visibleRow)}
+        on:mouseleave={() => (rowState.hovered = -1)}
+		class:selected={getStbSelected().has(visibleRow)}
+        class:hovered={rowState.hovered == visibleRow || rowState.menuRow == visibleRow}
+        class:is-editing={rowState.editing == visibleRow}
+        class:disabled={meta?.disabled}
+
         style:padding-right={canScroll && right ? "1.5rem" : "0.5rem"}
       >
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
         <div
           class="row-buttons"
           style:gap={inlineButtons.length > 1 ? "0.25rem" : "0rem"}
         >
-          {#if rowMenu && inlineButtons?.length}
-            {#each inlineButtons as { conditions, disabledTemplate, onClick, disabled, ...rest }}
-              {#if stbAPI.shouldShowButton(conditions || [], stbAPI.enrichContext($data[visibleRow]))}
-                <SuperButton
-                  {...rest}
-                  disabled={disabled ||
-                    $stbEditing == visibleRow ||
-                    $rowMetadata[visibleRow].disabled ||
-                    stbAPI.shouldDisableButton(
-                      disabledTemplate,
-                      stbAPI.enrichContext($data[visibleRow]),
-                      $allContext,
-                    )}
-                  onClick={() => {
-                    stbAPI.executeRowButtonAction(visibleRow, onClick);
-                  }}
-                />
-              {/if}
+          {#if rowMenu && rowButtons?.length}
+            {#each rowButtons as button, index (configuredButtonKey(button, index))}
+              <SuperButton
+                {...button}
+                onClick={() => button.onClick?.()}
+              />
             {/each}
           {/if}
           {#if rowMenu && menuItems?.length}
@@ -125,12 +112,18 @@
     <div class="add-row" style="padding: unset;"></div>
   {/if}
 
-  {#if $stbSettings.showFooter}
+  {#if stbSettings.showFooter}
     <div class="super-column-footer"></div>
   {/if}
 </div>
 
 {#if openMenu}
+  {@const menuRow = rows[rowState.menuRow]}
+  {@const menuMeta = menuRow?.__meta}
+  {@const overflowButtons = tableAPI.resolveRowButtons(menuItems, menuRow, {
+    forceDisabled:
+      inInsert || rowState.editing == rowState.menuRow || menuMeta?.disabled,
+  })}
   <SuperPopover
     open
     anchor={menuAnchor}
@@ -138,34 +131,22 @@
     align={right ? "right" : "left"}
     on:close={() => {
       openMenu = false;
-      $stbMenuID = undefined;
+      rowState.menuRow = -1;
     }}
   >
-    {#if menuItems?.length}
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
+    {#if overflowButtons?.length}
       <div class="action-menu">
-        {#each menuItems as { text, icon, disabled, onClick, size, conditions, disabledTemplate }}
-          {#if stbAPI.shouldShowButton(conditions || [], stbAPI.enrichContext($data[$stbMenuID]))}
-            <SuperButton
-              {size}
-              {icon}
-              {text}
-              disabled={disabled ||
-                $stbEditing == $stbMenuID ||
-                $rowMetadata[$stbMenuID].disabled ||
-                stbAPI.shouldDisableButton(
-                  disabledTemplate,
-                  stbAPI.enrichContext($data[$stbMenuID]),
-                )}
-              menuItem
-              menuAlign={right ? "right" : "left"}
-              onClick={() => {
-                stbAPI.executeRowButtonAction($stbMenuID, onClick);
-                openMenu = false;
-                $stbMenuID = undefined;
-              }}
-            />
-          {/if}
+        {#each overflowButtons as button, index (configuredButtonKey(button, index))}
+          <SuperButton
+            {...button}
+            menuItem
+            menuAlign={right ? "right" : "left"}
+            onClick={() => {
+              button.onClick?.();
+              openMenu = false;
+              rowState.menuRow = -1;
+            }}
+          />
         {/each}
       </div>
     {/if}

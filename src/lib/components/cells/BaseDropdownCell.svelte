@@ -5,25 +5,35 @@
 	import { tooltip } from '../../actions/tooltip';
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import {
+		consumeOpenOnEnter,
+		copyAndTransition,
+		deferJustCopied,
+		emittedFieldValuesEqual,
+		requestIconOpenOnEnter,
+		requestOpenOnEnter,
+		resolveCustomOptionColor,
+		resolveEmptyViewText,
+		resolveOptionColor,
+		shouldShowCellViewChrome
+	} from './helpers';
+	import type { CellOption as Option } from './types';
 
-	const { API, fetchData, QueryUtils } = getContext('sdk');
+	const SEARCH_DEBOUNCE_MS = 250; // independent from value-change debounce
 
-	interface Option {
-		label: string;
-		value: any;
-		color?: string;
-		icon?: string;
-	}
+	const { API, fetchData, QueryUtils, Provider, ContextScopes } = getContext('sdk');
 
 	let {
 		id,
-		cellOptions,
+		cellOptions = {},
 		fieldSchema,
 		value,
 		multi: multiProp = false,
 		autofocus = false,
-		buttons = []
+		buttons = [],
+		renderSlot = false,
+		keepOpen = false,
+		children
 	} = $props();
 
 	const dispatch = createEventDispatcher();
@@ -35,40 +45,38 @@
 	let disabled = $derived(cellOptions?.disabled);
 	let readonly = $derived(cellOptions?.readonly);
 	let copyable = $derived(cellOptions?.copyable);
-	let role = $derived(cellOptions?.role);
+	let copyIcon = $derived(cellOptions?.copyIcon ?? 'always');
+	let role = $derived(cellOptions?.role ?? 'form');
 	let error = $derived(cellOptions?.error);
 	let icon = $derived(cellOptions?.icon);
 	let filter = $derived(cellOptions?.filter);
 	let optionsViewMode = $derived(cellOptions?.optionsViewMode ?? 'text');
-	let source = $derived(cellOptions?.optionsSource);
-	let datasource = $derived(cellOptions?.optionsSource == 'data' ? cellOptions.datasource : null);
+	let source = $derived(cellOptions?.optionsSource ?? 'schema');
+	let datasource = $derived(source === 'data' ? cellOptions?.datasource : null);
 	let isDataSource = $derived(source === 'data' && !!datasource);
-	let serverSearch = $derived(isDataSource && (cellOptions?.search ?? true));
-	let showPopupSearch = $derived(
-		!inputSelect && (source === 'schema' || source === 'custom' || isDataSource)
-	);
+	let searchEnabled = $derived(cellOptions?.search ?? true);
+	let serverSearch = $derived(isDataSource && searchEnabled);
 	let limit = $derived(cellOptions?.limit ?? 15);
 	let labelColumn = $derived(cellOptions?.labelColumn || cellOptions?.valueColumn);
 	let valueColumn = $derived(cellOptions?.valueColumn);
 	let sortColumn = $derived(cellOptions?.sortColumn);
 	let sortOrder = $derived(cellOptions?.sortOrder);
-	let debounceDelay = $derived(cellOptions?.debounce || 250);
-	let debounced = $derived(cellOptions?.debounced ?? false);
+	let debounceMs = $derived(cellOptions?.debounce ?? null);
 	let showDirty = $derived(cellOptions?.showDirty);
+	let pickerWidth = $derived(cellOptions?.pickerWidth);
 
 	let _message = $state<string | null>(null);
-	let originalValue = $state<unknown>(null);
 	let filterTerm = $state('');
 	let popupSearchTerm = $state('');
 	let focusIdx = $state(-1);
 	let listElement = $state<HTMLElement | null>(null);
 	let popupSearchInput = $state<HTMLInputElement | null>(null);
 	let searchTimer = $state<ReturnType<typeof setTimeout>>();
+	let changeTimer = $state<ReturnType<typeof setTimeout>>();
 	let currentLimit = $state(15);
 	let isInitialLoad = $state(true);
 
 	let anchor = $state<HTMLElement | null>(null);
-	let popup = $state<HTMLElement | null>(null);
 	let editor = $state<HTMLInputElement | null>(null);
 
 	let open = $state(false);
@@ -98,14 +106,14 @@
 			return inclusion?.map((opt) => ({
 				label: opt,
 				value: opt,
-				color: fieldSchema?.optionColors?.[opt]
+				color: resolveOptionColor(opt, fieldSchema)
 			}));
 		} else if (source === 'custom') {
 			return (
 				cellOptions.customOptions?.map((opt) => ({
 					label: opt.label,
 					value: opt.value,
-					color: opt.color,
+					color: resolveCustomOptionColor(opt.value, fieldSchema, cellOptions.customOptions),
 					icon: opt.icon
 				})) ?? []
 			);
@@ -114,6 +122,7 @@
 				$fetch?.rows?.map((row) => ({
 					label: row[labelColumn],
 					value: row[valueColumn],
+					row: row,
 					color: cellOptions.colorColumn ? row[cellOptions.colorColumn] : undefined,
 					icon: cellOptions.iconColumn ? row[cellOptions.iconColumn] : undefined
 				})) ?? []
@@ -129,6 +138,8 @@
 
 	let displayOptions: Option[] = $derived.by(() => {
 		const base = allOptions ?? [];
+		if (!searchEnabled) return base;
+
 		const term = activeSearchTerm.trim();
 
 		if (!term) {
@@ -215,10 +226,10 @@
 	};
 
 	const scheduleDataSearch = (term: string) => {
-		if (!fetch || !isDataSource || !serverSearch) return;
+		if (!fetch || !isDataSource || !searchEnabled) return;
 
 		clearTimeout(searchTimer);
-		const delay = inputSelect ? debounceDelay : 200;
+		const delay = SEARCH_DEBOUNCE_MS;
 
 		searchTimer = setTimeout(() => {
 			currentLimit = limit;
@@ -259,9 +270,10 @@
 	};
 
 	const handlePopupSearch = (e: Event) => {
+		if (!searchEnabled) return;
 		popupSearchTerm = (e.target as HTMLInputElement).value;
 		focusIdx = popupSearchTerm && displayOptions.length ? 0 : -1;
-		if (isDataSource && serverSearch) {
+		if (isDataSource) {
 			scheduleDataSearch(popupSearchTerm);
 		}
 	};
@@ -304,10 +316,16 @@
 		},
 		view: {
 			focus: () => {
+				requestOpenOnEnter();
+				return 'editing';
+			},
+			toggle: () => {
+				requestIconOpenOnEnter();
 				return 'editing';
 			},
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+					requestOpenOnEnter();
 					navigateOptions(e);
 					return 'editing';
 				}
@@ -322,8 +340,8 @@
 					}, 1000);
 					return 'view';
 				}
-				originalValue = getEmittedValue();
-				open = true;
+				localValue = resolveToOptions(value);
+				open = consumeOpenOnEnter();
 				focusIdx = -1;
 				dispatch('enteredit');
 			},
@@ -331,25 +349,34 @@
 				open = false;
 				clearSearchState();
 				dispatch('exitedit');
-				if (!debounced) {
+			},
+			change() {
+				if (debounceMs) {
+					clearTimeout(changeTimer);
+					changeTimer = setTimeout(() => emitChange(), debounceMs);
+				}
+			},
+			submit() {
+				if (isDirty && !debounceMs) {
 					emitChange();
 				}
 			},
 			cancel() {
-				localValue = resolveToOptions(originalValue);
+				clearTimeout(changeTimer);
+				localValue = resolveToOptions(value);
 				open = false;
 				clearSearchState();
 				dispatch('cancel');
 				anchor?.focus();
 				return 'view';
 			},
-			debounce() {
+			inputChange() {
 				const term = editor?.value ?? '';
-				filterTerm = term;
+				filterTerm = searchEnabled ? term : '';
 				open = true;
-				focusIdx = term && displayOptions.length ? 0 : -1;
+				focusIdx = searchEnabled && term && displayOptions.length ? 0 : -1;
 
-				if (isDataSource) {
+				if (searchEnabled && isDataSource) {
 					scheduleDataSearch(term);
 				}
 
@@ -362,15 +389,16 @@
 						]
 					: [];
 
-				if (debounced) {
-					emitChange();
-				}
+				this.change();
 			},
-			click: () => {
+			toggle: () => {
 				open = !open;
 				if (open) {
 					focusIdx = -1;
 				}
+			},
+			click() {
+				this.toggle();
 			},
 			selectOption: (newValue: string) => {
 				const option =
@@ -386,9 +414,7 @@
 					} else {
 						localValue = [...localValue, option];
 					}
-					if (debounced) {
-						emitChange();
-					}
+					this.change();
 					return;
 				}
 
@@ -402,14 +428,11 @@
 					}
 				}
 
-				if (debounced) {
-					emitChange();
-				}
+				csm.change();
 
 				open = false;
 				clearSearchState();
 				anchor?.focus();
-				return 'view';
 			},
 			focusout: (e: FocusEvent) => {
 				const related = e.relatedTarget as Node | null;
@@ -418,12 +441,20 @@
 						return;
 					}
 				}
+
+				if (debounceMs && isDirty) {
+					clearTimeout(changeTimer);
+					emitChange();
+				} else {
+					csm.submit();
+				}
 				return 'view';
 			},
 			popupFocusout: (e: FocusEvent) => {
-				if (anchor?.contains(e.relatedTarget as Node | null)) {
+				if (e.relatedTarget === anchor) {
 					return;
 				}
+				csm.submit();
 				return 'view';
 			},
 			keydown(e: KeyboardEvent) {
@@ -440,7 +471,7 @@
 		readonly: {},
 		disabled: {},
 		copyable: {
-			click() {
+			copy() {
 				const copyValue = Array.isArray(value)
 					? value.join(', ')
 					: value != null
@@ -452,21 +483,28 @@
 			keydown(e: KeyboardEvent) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
 		justCopied: deferJustCopied(() => csm)
 	});
 
-	let isDirty = $derived(
-		$csm === 'editing' && JSON.stringify(getEmittedValue()) !== JSON.stringify(originalValue)
-	);
+	let dirty = $derived(cellOptions?.dirty);
+	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(inEdit && !emittedFieldValuesEqual(getEmittedValue(), value));
+	let emptyViewText = $derived(_message || cellOptions?.placeholder || 'Select...');
+
+	$effect(() => {
+		return () => clearTimeout(changeTimer);
+	});
 
 	$effect(() => {
 		void value;
 		void allOptions;
-		localValue = resolveToOptions(value);
+		if (!inEdit) {
+			localValue = resolveToOptions(value);
+		}
 	});
 
 	$effect(() => {
@@ -522,10 +560,6 @@
 				csm.focus();
 			}, 50);
 		}
-
-		return () => {
-			clearTimeout(searchTimer);
-		};
 	});
 
 	const focus = (node: HTMLElement) => {
@@ -543,19 +577,25 @@
 	{role}
 	{error}
 	{icon}
-	isDirty={isDirty && showDirty}
+	controlIcon={'ph ph-caret-down'}
+	isDirty={dirty && showDirty}
 	popupOpen={open}
+	{copyIcon}
+	align={cellOptions?.align}
 	{buttons}
 >
 	{#key $csm}
 		{#if $csm !== 'editing' || !inputSelect}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<span class="value" class:placeholder={isEmpty}>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="value-content" use:tooltip>
+			<div
+				class="value-contents"
+				class:placeholder={isEmpty && shouldShowCellViewChrome(role, inEdit)}
+				use:tooltip
+			>
+				<div class="value">
 					{#key localValue}
 						{#if isEmpty}
-							{_message || cellOptions?.placeholder || 'Select...'}
+							{resolveEmptyViewText(emptyViewText, role, inEdit)}
 						{:else}
 							<div class="items" class:pills class:bullets>
 								{#if plaintext}
@@ -574,7 +614,7 @@
 						{/if}
 					{/key}
 				</div>
-			</span>
+			</div>
 		{:else}
 			<input
 				bind:this={editor}
@@ -584,101 +624,118 @@
 				value={_message || localValue[0]?.value}
 				placeholder={cellOptions?.placeholder}
 				style:text-align={cellOptions.align}
-				on:input={csm.debounce}
+				on:input={csm.inputChange}
 				on:focusout={csm.focusout}
 				on:keydown={csm.keydown}
 				use:focus
 			/>
-		{/if}
-		{#if $csm === 'view' || $csm == 'editing'}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<i class="ph ph-caret-down control-icon" on:click|self={csm.click}></i>
 		{/if}
 	{/key}
 </BaseCell>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore event_directive_deprecated -->
-<SuperPopover {anchor} {open} useAnchorWidth={true} dismissible={false}>
-	{#snippet renderOption(option: Option, idx: number, selected: boolean = isSelected(option))}
-		<div
-			class="option"
-			class:selected
-			class:highlighted={focusIdx === idx}
-			on:mouseenter={() => (focusIdx = idx)}
-			on:mousedown|preventDefault={() => csm.selectOption(option.value)}
-		>
-			{#if option?.icon}
-				<span class="icon">{option.icon}</span>
-			{/if}
-			<span class="label" use:tooltip>{option?.label}</span>
-			{#if selected}
-				<span class="ph ph-check"></span>
-			{/if}
-		</div>
-	{/snippet}
-
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore event_directive_deprecated -->
-	<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
-		{#if showPopupSearch}
-			<div class="popup-search">
-				<i class="ph ph-magnifying-glass"></i>
-				<input
-					bind:this={popupSearchInput}
-					class="search"
-					class:placeholder={!popupSearchTerm}
-					type="text"
-					placeholder={'Search...'}
-					value={popupSearchTerm}
-					use:focus
-					on:input={handlePopupSearch}
-				/>
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<i
-					class="ph ph-x clear-icon"
-					on:mousedown|preventDefault|stopPropagation={() => (popupSearchTerm = '')}
-				></i>
+{#if $csm == 'editing'}
+	<SuperPopover
+		{anchor}
+		open={open || keepOpen}
+		useAnchorWidth={true}
+		dismissible={false}
+		minWidth={pickerWidth}
+		align={cellOptions?.pickerAlign ?? 'left'}
+	>
+		{#snippet renderOption(option: Option, idx: number, selected: boolean = isSelected(option))}
+			<div
+				class="option"
+				class:selected
+				class:highlighted={focusIdx === idx}
+				on:mouseenter={() => (focusIdx = idx)}
+				on:mousedown|preventDefault={() => csm.selectOption(option.value)}
+			>
+				{#if renderSlot}
+					<Provider
+						data={{ value: option.value, label: option.label, row: option.row }}
+						scope={ContextScopes.Local}
+					>
+						{@render children?.()}
+					</Provider>
+				{:else}
+					{#if option?.icon}
+						<span class="icon">{option.icon}</span>
+					{/if}
+					<span class="label" use:tooltip>{option?.label}</span>
+					{#if selected}
+						<span class="ph ph-check"></span>
+					{/if}
+				{/if}
 			</div>
-		{/if}
+		{/snippet}
 
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore event_directive_deprecated -->
-		<div
-			class="options"
-			bind:this={listElement}
-			on:scroll={handleScroll}
-			on:mousedown|preventDefault={() => {}}
-		>
-			{#if displayOptions.length === 0}
-				<div class="option disabled">
-					{#if isDataSource && $fetch?.loading}
-						<i class="ph ph-spinner spin"></i>
-						Loading...
-					{:else}
-						No options available
+		<div class="popup" on:focusout={csm.popupFocusout} on:keydown={csm.popupKeydown}>
+			{#if searchEnabled && !inputSelect}
+				<div class="popup-search">
+					<i class="ph ph-magnifying-glass"></i>
+					<input
+						bind:this={popupSearchInput}
+						class="search"
+						class:placeholder={!popupSearchTerm}
+						type="text"
+						placeholder={'Search...'}
+						value={popupSearchTerm}
+						use:focus
+						on:input={handlePopupSearch}
+					/>
+					{#if popupSearchTerm}
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<i
+							class="ph ph-x clear-icon"
+							on:mousedown|preventDefault|stopPropagation={() => (popupSearchTerm = '')}
+						></i>
 					{/if}
 				</div>
-			{:else}
-				{#each displayOptions as option, idx (option.value)}
-					{@render renderOption(option, idx)}
-				{/each}
-				{#if isDataSource && $fetch?.loading && $fetch.loaded}
-					<div class="option disabled loading">
-						<i class="ph ph-spinner spin"></i>
-						Loading more...
-					</div>
-				{/if}
 			{/if}
+
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<!-- svelte-ignore event_directive_deprecated -->
+			<div
+				class="options"
+				bind:this={listElement}
+				on:scroll={handleScroll}
+				on:mousedown|preventDefault={() => {}}
+			>
+				{#if displayOptions.length === 0}
+					<div class="option disabled">
+						{#if isDataSource && $fetch?.loading}
+							<i class="ph ph-spinner spin"></i>
+							Loading...
+						{:else}
+							No options available
+						{/if}
+					</div>
+				{:else}
+					{#each displayOptions as option, idx (option.value)}
+						{@render renderOption(option, idx)}
+					{/each}
+					{#if isDataSource && $fetch?.loading && $fetch.loaded}
+						<div class="option disabled loading">
+							<i class="ph ph-spinner spin"></i>
+							Loading more...
+						</div>
+					{/if}
+				{/if}
+			</div>
 		</div>
-	</div>
-</SuperPopover>
+	</SuperPopover>
+{/if}
 
 <style>
 	.popup {
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
+		min-width: 0;
 	}
 
 	.popup-search {
@@ -688,7 +745,8 @@
 		align-items: center;
 		gap: 0.25rem;
 		flex-shrink: 0;
-		padding: 0rem 0.75rem;
+		min-width: 0;
+		padding: 0rem 0.25rem 0rem 0.75rem;
 	}
 
 	.popup-search > i {
@@ -708,6 +766,7 @@
 
 	.popup-search > input {
 		flex: 1;
+		min-width: 0;
 		height: 100%;
 		max-width: 100%;
 		outline: none;
@@ -769,46 +828,22 @@
 		white-space: nowrap;
 	}
 
-	span.value {
+	.value-contents {
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
 		display: flex;
-		align-items: stretch;
-		height: 100%;
-		background: transparent;
-		color: inherit;
-		border: none;
-		outline: none;
-		cursor: inherit;
-		padding: 0.25rem 0.75rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	span.value:has(.items) {
-		white-space: normal;
-	}
-
-	.value-content {
-		min-width: 0;
-		flex: 1;
-		font-style: inherit;
-		font-size: 13px;
-		text-overflow: ellipsis;
-		overflow: hidden;
-		white-space: nowrap;
-		display: flex;
 		align-items: center;
+		padding: var(--super-cell-padding);
 	}
 
-	.value-content:has(.items) {
-		white-space: normal;
-		display: flex;
+	.value {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.value.placeholder .value-content {
+	.value-contents.placeholder {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
 	}
@@ -859,9 +894,9 @@
 	}
 
 	.loope {
-		width: 14px;
-		height: 14px;
-		border-radius: 2px;
+		width: 16px;
+		height: 16px;
+		border-radius: 1rem;
 		background-color: var(--option-color, var(--spectrum-global-color-gray-300));
 		flex-shrink: 0;
 	}

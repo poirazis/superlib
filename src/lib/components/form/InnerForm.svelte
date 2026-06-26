@@ -1,7 +1,9 @@
-<svelte:options runes={false} />
-
 <script lang="ts">
-  import { setContext, getContext, createEventDispatcher } from "svelte";
+  import { setContext, getContext, createEventDispatcher, untrack } from "svelte";
+  import FormFieldGrid from "./FormFieldGrid.svelte";
+  import { buildFormDataContext } from "../../utils/formContext.ts";
+  import { cloneDeep, deepGet, deepSet } from "../../utils/objectUtils.ts";
+  import { generate as uuid } from "shortid";
   import type { Readable, Writable } from "svelte/store";
   import { derived, get, writable } from "svelte/store";
   import type {
@@ -23,6 +25,8 @@
       fieldId: string;
       value: T;
       defaultValue: T;
+      initialValue: T;
+      dirty: boolean;
       disabled: boolean;
       readonly: boolean;
       fieldDisabled: boolean;
@@ -39,23 +43,47 @@
     fieldSchema: FieldSchema | {};
   };
 
-  export let dataSource: DataFetchDatasource | undefined = undefined;
-  export let disabled: boolean = false;
-  export let readonly: boolean = false;
-  export let initialValues: Record<string, any> | undefined = undefined;
-  export const size: "Medium" | "Large" | undefined = undefined;
-  export let schema: TableSchema | undefined = undefined;
-  export let definition: Table | undefined = undefined;
-  export let disableSchemaValidation: boolean = false;
-  export let editAutoColumns: boolean = false;
-  export let provideContext: boolean = true;
-  export let provideContextScope: "local" | "global" = "global";
-  export let currentStep: Writable<number>;
-  export let formValue: Record<string, any> = {};
-  export let labelPosition: string | boolean = "above";
-  export let columns: number = 1;
-  export let rowGap: string = "0.5rem";
-  export let columnGap: string = "0.5rem";
+  let {
+    dataSource = undefined,
+    disabled = false,
+    readonly = false,
+    initialValues = undefined,
+    size,
+    schema = undefined,
+    definition = undefined,
+    disableSchemaValidation = false,
+    editAutoColumns = false,
+    provideContext = true,
+    provideContextScope = "global",
+    currentStep,
+    formValue = $bindable({}),
+    labelPosition = "above",
+    columns = 1,
+    form = $bindable(),
+    children,
+  }: {
+    dataSource?: DataFetchDatasource | undefined;
+    disabled?: boolean;
+    readonly?: boolean;
+    initialValues?: Record<string, any> | undefined;
+    size?: "Medium" | "Large" | undefined;
+    schema?: TableSchema | undefined;
+    definition?: Table | undefined;
+    disableSchemaValidation?: boolean;
+    editAutoColumns?: boolean;
+    provideContext?: boolean;
+    provideContextScope?: "local" | "global";
+    currentStep: Writable<number>;
+    formValue?: Record<string, any>;
+    labelPosition?: string | boolean;
+    columns?: number;
+    form?: {
+      formState: typeof formState;
+      formApi: typeof formApi;
+      dataSource: DataFetchDatasource | undefined;
+    };
+    children?: import("svelte").Snippet;
+  } = $props();
 
   const {
     Provider,
@@ -64,66 +92,37 @@
     ContextScopes,
   } = getContext("sdk");
 
-  let fields: Writable<FieldInfo>[] = [];
+  let fields = $state<Writable<FieldInfo>[]>([]);
   export const formState = writable({
     values: {},
     errors: {},
     valid: true,
     dirty: false,
-    currentStep: get(currentStep),
+    currentStep: 1,
   });
 
-  $: values = deriveFieldProperty(fields, (f) => f.fieldState.value);
-  $: formValue = $values;
-  $: errors = deriveFieldProperty(fields, (f) => f.fieldState.error);
-  $: enrichments = deriveBindingEnrichments(fields);
-  $: valid = !Object.values($errors).some((error) => error != null);
-  $: dirty = deriveDirtyStatus(fields, initialValues);
-  $: updateFieldStates(disabled, readonly);
+  let values = $state<Record<string, any>>({});
+  let errors = $state<Record<string, any>>({});
+  let enrichments = $state<Record<string, string>>({});
+  let dirty = $state(false);
+  let currentStepValid = $state(true);
+  let currentStepValue = $state(1);
 
-  $: currentStepValid = derived(
-    [currentStep, ...fields],
-    ([currentStepValue, ...fieldsValue]) => {
-      return !fieldsValue
-        .filter((f) => f.step === currentStepValue)
-        .some((f) => f.fieldState.error != null);
-    },
+  let valid = $derived(
+    !Object.values(errors).some((error) => error != null),
   );
 
-  // Offer the form as a bindable property so it can be puppeteered by parent components
-  export let form;
-  $: form = {
-    formState,
-    formApi,
-    dataSource,
+  const recordsEqual = (
+    a: Record<string, any>,
+    b: Record<string, any>,
+  ): boolean => {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) {
+      return false;
+    }
+    return keysA.every((key) => a[key] === b[key]);
   };
-
-  $: {
-    formState.set({
-      values: $values,
-      errors: $errors,
-      valid,
-      dirty: $dirty,
-      currentStep: $currentStep,
-    });
-  }
-
-  $: formValue = deriveFormValue(initialValues, $values, $enrichments);
-
-  $: dataContext = {
-    ...formValue,
-    __value: formValue,
-    __valid: valid,
-    __dirty: $dirty,
-    __currentStep: $currentStep,
-    __currentStepValid: $currentStepValid,
-    __editing: !readonly && !disabled,
-  };
-
-  $: scope =
-    provideContextScope === "local"
-      ? ContextScopes.Local
-      : ContextScopes.Global;
 
   const deriveFieldProperty = (
     fieldStores: Readable<FieldInfo>[],
@@ -137,28 +136,39 @@
     });
   };
 
-  const deriveDirtyStatus = (
-    fieldStores: Readable<FieldInfo>[],
-    initialValues: Record<string, any> | undefined,
-  ) => {
+  const deriveDirtyStatus = (fieldStores: Readable<FieldInfo>[]) => {
     return derived(fieldStores, (fieldValues) => {
-      return fieldValues.some((field) => {
-        const initial =
-          deepGet(initialValues, field.name) ?? field.fieldState.defaultValue;
-        return field.fieldState.value !== initial;
-      });
+      return fieldValues.some((field) => field.fieldState.dirty);
     });
+  };
+
+  const fieldValuesEqual = (a: any, b: any): boolean => {
+    if (a === b) return true;
+    if (a == null && b == null) return true;
+    if (typeof a === "object" || typeof b === "object") {
+      if (a == null || b == null) return false;
+      return JSON.stringify(a) === JSON.stringify(b);
+    }
+    return String(a) === String(b);
+  };
+
+  const hasRegisteredFieldValue = (value: any): boolean => {
+    if (value == null || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
   };
 
   const deriveBindingEnrichments = (fieldStores: Readable<FieldInfo>[]) => {
     return derived(fieldStores, (fieldValues) => {
       const enrichments: Record<string, string> = {};
       fieldValues.forEach((field) => {
-        if (field.type === "attachment") {
+        if (field.type === "attachment" || field.type === "attachment_single") {
           const value = field.fieldState.value;
           let url = null;
           if (Array.isArray(value) && value[0] != null) {
             url = value[0].url;
+          } else if (value && typeof value === "object" && "url" in value) {
+            url = (value as { url?: string }).url ?? null;
           }
           enrichments[`${field.name}_first`] = url;
         }
@@ -238,22 +248,67 @@
 
       defaultValue = sanitiseValue(defaultValue, schema?.[field], type);
 
-      let initialValue = deepGet(initialValues, field) ?? defaultValue;
-      let initialError = null;
-      let fieldId = `id-${uuid()}`;
-      const existingField = getField(field);
+      const loadedValue = deepGet(initialValues, field) ?? defaultValue;
+      const existingField = fields.find((info) => get(info).name === field);
+      const isAutoColumn = !!schema?.[field]?.autocolumn;
+
       if (existingField) {
         const { fieldState } = get(existingField);
-        fieldId = fieldState.fieldId;
-        if (fieldState.value != null && fieldState.value !== "") {
-          initialValue = fieldState.value;
+        const loadedFromRow = deepGet(initialValues, field);
+        const shouldSyncValue =
+          !fieldState.dirty &&
+          loadedFromRow != null &&
+          loadedFromRow !== "" &&
+          !fieldValuesEqual(fieldState.value, loadedFromRow);
+
+        let nextValue = fieldState.value;
+        let nextInitialValue = fieldState.initialValue ?? loadedValue;
+        if (shouldSyncValue) {
+          nextValue = loadedFromRow;
+          nextInitialValue = loadedFromRow;
+        } else if (hasRegisteredFieldValue(fieldState.value)) {
+          nextValue = fieldState.value;
+        } else {
+          nextValue = loadedValue;
+          nextInitialValue = loadedValue;
         }
-        if (fieldState.error) {
-          initialError = validator?.(initialValue);
+
+        let nextError = fieldState.error;
+        if (nextError) {
+          nextError = validator?.(nextValue);
         }
+
+        existingField.update((state) => {
+          state.fieldState.fieldDisabled = fieldDisabled;
+          state.fieldState.fieldReadOnly = fieldReadOnly;
+          state.fieldState.disabled =
+            disabled ||
+            fieldDisabled ||
+            (isAutoColumn && !editAutoColumns);
+          state.fieldState.readonly =
+            readonly ||
+            fieldReadOnly ||
+            (schema?.[field] as any)?.readonly;
+          state.fieldState.validator = validator;
+          state.fieldState.defaultValue = defaultValue;
+          state.fieldState.value = nextValue;
+          state.fieldState.initialValue = nextInitialValue;
+          state.fieldState.dirty = !fieldValuesEqual(
+            nextValue,
+            nextInitialValue,
+          );
+          state.fieldState.error = nextError;
+          state.fieldState.lastUpdate = Date.now();
+          state.fieldSchema = schema?.[field] ?? {};
+          return state;
+        });
+
+        return existingField;
       }
 
-      const isAutoColumn = !!schema?.[field]?.autocolumn;
+      let fieldValue = loadedValue;
+      let initialError = null;
+      const fieldId = `id-${uuid()}`;
 
       const fieldInfo = writable<FieldInfo>({
         name: field,
@@ -261,15 +316,19 @@
         step: step || 1,
         fieldState: {
           fieldId,
-          value: initialValue,
+          value: fieldValue,
           error: initialError,
           disabled:
-            disabled || fieldDisabled || (isAutoColumn && !editAutoColumns),
+            disabled ||
+            fieldDisabled ||
+            (isAutoColumn && !editAutoColumns),
           readonly:
             readonly || fieldReadOnly || (schema?.[field] as any)?.readonly,
           fieldDisabled,
           fieldReadOnly,
           defaultValue,
+          initialValue: loadedValue,
+          dirty: !fieldValuesEqual(fieldValue, loadedValue),
           validator,
           lastUpdate: Date.now(),
         },
@@ -277,12 +336,7 @@
         fieldSchema: schema?.[field] ?? {},
       });
 
-      if (existingField) {
-        const otherFields = fields.filter((info) => get(info).name !== field);
-        fields = [...otherFields, fieldInfo];
-      } else {
-        fields = [...fields, fieldInfo];
-      }
+      fields = [...fields, fieldInfo];
 
       return fieldInfo;
     },
@@ -347,6 +401,15 @@
       const { fieldApi } = get(field);
       fieldApi.reset();
     },
+    acceptChanges: () => {
+      fields.forEach((fieldStore) => {
+        fieldStore.update((state) => {
+          state.fieldState.initialValue = state.fieldState.value;
+          state.fieldState.dirty = false;
+          return state;
+        });
+      });
+    },
   };
 
   const makeFieldApi = (field: string) => {
@@ -363,6 +426,10 @@
       fieldInfo.update((state) => {
         state.fieldState.value = value;
         state.fieldState.error = error;
+        state.fieldState.dirty = !fieldValuesEqual(
+          value,
+          state.fieldState.initialValue,
+        );
         state.fieldState.lastUpdate = Date.now();
         return state;
       });
@@ -373,11 +440,12 @@
     const reset = () => {
       const fieldInfo = getField(field);
       const { fieldState } = get(fieldInfo);
-      const newValue = fieldState.defaultValue;
+      const newValue = fieldState.initialValue;
 
       fieldInfo.update((state) => {
         state.fieldState.value = newValue;
         state.fieldState.error = null;
+        state.fieldState.dirty = false;
         state.fieldState.lastUpdate = Date.now();
         return state;
       });
@@ -430,12 +498,190 @@
   setContext("form", {
     formState,
     formApi,
-    dataSource,
+    get dataSource() {
+      return dataSource;
+    },
   });
 
   setContext("form-step", writable(1));
-  $: setContext("field-group", labelPosition);
-  $: setContext("field-group-columns", columns);
+
+  $effect(() => {
+    return currentStep.subscribe((step) => {
+      if (currentStepValue !== step) {
+        currentStepValue = step;
+      }
+    });
+  });
+
+  $effect(() => {
+    const fieldsList = fields;
+    const store = deriveFieldProperty(
+      fieldsList,
+      (f) => f.fieldState.value,
+    );
+    return store.subscribe((nextValues) => {
+      untrack(() => {
+        if (!recordsEqual(values, nextValues)) {
+          values = nextValues;
+        }
+      });
+    });
+  });
+
+  $effect(() => {
+    const fieldsList = fields;
+    const store = deriveFieldProperty(fieldsList, (f) => f.fieldState.error);
+    return store.subscribe((nextErrors) => {
+      untrack(() => {
+        if (!recordsEqual(errors, nextErrors)) {
+          errors = nextErrors;
+        }
+      });
+    });
+  });
+
+  $effect(() => {
+    const fieldsList = fields;
+    const store = deriveBindingEnrichments(fieldsList);
+    return store.subscribe((nextEnrichments) => {
+      untrack(() => {
+        if (!recordsEqual(enrichments, nextEnrichments)) {
+          enrichments = nextEnrichments;
+        }
+      });
+    });
+  });
+
+  $effect(() => {
+    const fieldsList = fields;
+    const store = deriveDirtyStatus(fieldsList);
+    return store.subscribe((nextDirty) => {
+      untrack(() => {
+        if (dirty !== nextDirty) {
+          dirty = nextDirty;
+        }
+      });
+    });
+  });
+
+  $effect(() => {
+    const fieldsList = fields;
+    const store = derived(
+      [currentStep, ...fieldsList],
+      ([currentStepValue, ...fieldsValue]) => {
+        return !fieldsValue
+          .filter((f) => f.step === currentStepValue)
+          .some((f) => f.fieldState.error != null);
+      },
+    );
+    return store.subscribe((nextValid) => {
+      untrack(() => {
+        if (currentStepValid !== nextValid) {
+          currentStepValid = nextValid;
+        }
+      });
+    });
+  });
+
+  $effect(() => {
+    values;
+    errors;
+    valid;
+    dirty;
+    currentStepValue;
+    untrack(() => {
+      formState.set({
+        values,
+        errors,
+        valid,
+        dirty,
+        currentStep: currentStepValue,
+        currentStepValid,
+      });
+    });
+  });
+
+  $effect(() => {
+    const nextFormValue = deriveFormValue(initialValues, values, enrichments);
+    if (JSON.stringify(formValue) !== JSON.stringify(nextFormValue)) {
+      formValue = nextFormValue;
+    }
+  });
+
+  $effect(() => {
+    dataSource;
+    untrack(() => {
+      form = {
+        formState,
+        formApi,
+        dataSource,
+      };
+    });
+  });
+
+  let dataContext = $derived(
+    buildFormDataContext(formValue, {
+      valid,
+      dirty,
+      currentStep: currentStepValue,
+      currentStepValid,
+      editing: !readonly && !disabled,
+    }),
+  );
+
+  let scope = $derived(
+    provideContextScope === "local"
+      ? ContextScopes.Local
+      : ContextScopes.Global,
+  );
+
+  $effect(() => {
+    labelPosition;
+    untrack(() => setContext("field-group", labelPosition));
+  });
+
+  const normalizedColumns = $derived(Math.max(1, Number(columns) || 1));
+  const fieldGroupColumnsStore = writable(
+    untrack(() => Math.max(1, Number(columns) || 1)),
+  );
+  setContext("field-group-columns", fieldGroupColumnsStore);
+
+  $effect(() => {
+    fieldGroupColumnsStore.set(normalizedColumns);
+  });
+
+  $effect(() => {
+    disabled;
+    readonly;
+    untrack(() => updateFieldStates(disabled, readonly));
+  });
+
+  $effect(() => {
+    const rowValues = initialValues;
+    if (!rowValues) return;
+
+    untrack(() => {
+      fields.forEach((fieldStore) => {
+        fieldStore.update((state) => {
+          const loaded = deepGet(rowValues, state.name);
+          if (
+            state.fieldState.dirty ||
+            loaded == null ||
+            loaded === "" ||
+            fieldValuesEqual(state.fieldState.value, loaded)
+          ) {
+            return state;
+          }
+
+          state.fieldState.value = loaded;
+          state.fieldState.initialValue = loaded;
+          state.fieldState.dirty = false;
+          state.fieldState.lastUpdate = Date.now();
+          return state;
+        });
+      });
+    });
+  });
 
   const handleUpdateFieldValue = ({
     type,
@@ -509,65 +755,6 @@
     { type: ActionTypes.ScrollTo, callback: handleScrollToField },
   ];
 
-  // Generate a UUID (simplified version for brevity)
-  function uuid(): string {
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
-
-  // Deep clone an object
-  function cloneDeep<T>(obj: T): T {
-    if (obj == null || typeof obj !== "object") {
-      return obj;
-    }
-    if (Array.isArray(obj)) {
-      return obj.map(cloneDeep) as any;
-    }
-    const cloned: any = {};
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        cloned[key] = cloneDeep(obj[key]);
-      }
-    }
-    return cloned;
-  }
-
-  // Get a value from an object using a dot-notation path
-  function deepGet(obj: any, path: string | string[]): any {
-    if (!obj || !path) {
-      return undefined;
-    }
-    const pathArray = Array.isArray(path) ? path : path.split(".");
-    let current = obj;
-    for (const key of pathArray) {
-      if (current == null) {
-        return undefined;
-      }
-      current = current[key];
-    }
-    return current;
-  }
-
-  // Set a value in an object using a dot-notation path
-  function deepSet(obj: any, path: string | string[], value: any): void {
-    if (!obj || !path) {
-      return;
-    }
-    const pathArray = Array.isArray(path) ? path : path.split(".");
-    let current = obj;
-    for (let i = 0; i < pathArray.length - 1; i++) {
-      const key = pathArray[i];
-      if (!current[key] || typeof current[key] !== "object") {
-        current[key] = {};
-      }
-      current = current[key];
-    }
-    current[pathArray[pathArray.length - 1]] = value;
-  }
-
   // Update field disabled/readonly states when props change
   const updateFieldStates = (formDisabled: boolean, formReadonly: boolean) => {
     if (fields.length > 0) {
@@ -592,46 +779,11 @@
 {#key labelPosition}
   {#if provideContext}
     <Provider {actions} data={dataContext} {scope}>
-      <div
-        class="super-form-inner-form"
-        class:labels-left={labelPosition === "left"}
-        class:no-labels={labelPosition === false || labelPosition === "none"}
-        class:field-group={columns > 1}
-        style:grid-template-columns={`repeat(${columns * 6}, 1fr)`}
-        style:row-gap={rowGap}
-        style:column-gap={columnGap}
-      >
-        <slot />
-      </div>
+      <FormFieldGrid {columns} {labelPosition}>
+        {@render children?.()}
+      </FormFieldGrid>
     </Provider>
   {:else}
-    <slot />
+    {@render children?.()}
   {/if}
 {/key}
-
-<style>
-  .super-form-inner-form {
-    flex: auto;
-    display: flex;
-    flex-direction: column;
-  }
-  .super-form-inner-form.field-group {
-    flex: auto;
-    display: grid;
-    column-gap: 0.5rem;
-    row-gap: 0.5rem;
-    align-content: flex-start;
-  }
-
-  :global(.super-form-inner-form.field-group > .component > *) {
-    grid-column: span 6;
-  }
-
-  .super-form-inner-form.labels-left {
-    row-gap: 0.5rem;
-    column-gap: 1rem;
-  }
-  .super-form-inner-form.no-labels {
-    row-gap: 0.25rem;
-  }
-</style>

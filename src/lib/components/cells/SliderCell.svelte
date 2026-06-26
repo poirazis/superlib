@@ -2,7 +2,8 @@
 	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './helpers';
+
 
 	const dispatch = createEventDispatcher();
 
@@ -11,7 +12,6 @@
 		value,
 		cellOptions = {
 			role: 'form',
-			initialState: 'view',
 			debounce: false,
 			min: 0,
 			max: 100,
@@ -22,13 +22,12 @@
 	} = $props();
 
 	let timer = $state();
-	let localValue = $derived(value);
+	let localValue = $state();
 	let errors = $state([]);
 	let trackElement = $state();
 	let dragging = $state(false);
 
 	let config = $derived(cellOptions ?? {});
-	let initialState = $derived(config.initialState || 'editing');
 	let min = $derived(config.min ?? 0);
 	let max = $derived(config.max ?? 100);
 	let step = $derived(config.step ?? 1);
@@ -42,7 +41,7 @@
 	let color = $derived(config.color);
 	let background = $derived(config.background);
 	let showDirty = $derived(config.showDirty);
-	let debounceDelay = $derived(config.debounce);
+	let debounceMs = $derived(config.debounce ?? null);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let disabled = $derived(config.disabled);
@@ -51,7 +50,9 @@
 
 	let error = $derived(optionError || errors.length > 0);
 	let icon = $derived(error ? 'ph ph-warning' : optionIcon);
-	let isDirty = $derived(value !== localValue);
+	let dirty = $derived(config.dirty);
+	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(inEdit && value !== localValue);
 	let interactive = $derived(!disabled && !readonly && ($csm === 'view' || $csm === 'editing'));
 
 	let fillPercent = $derived.by(() => {
@@ -94,23 +95,14 @@
 		return snapValue(parseFloat(raw));
 	};
 
-	const emitChange = (nextValue) => {
-		if (debounceDelay) {
-			clearTimeout(timer);
-			timer = setTimeout(() => {
-				dispatch('change', nextValue);
-			}, debounceDelay);
-			return;
-		}
-
-		dispatch('change', nextValue);
-	};
-
 	const setLocalValue = (nextValue, emit = true) => {
 		const snapped = snapValue(nextValue);
 		localValue = snapped;
 		if (emit) {
-			emitChange(snapped);
+			csm.change();
+			if (!debounceMs) {
+				csm.submit();
+			}
 		}
 	};
 
@@ -171,11 +163,14 @@
 			goTo(state) {
 				return state;
 			},
+			copy() {},
+			click() {},
+			toggle() {},
 			reset(newValue) {
 				if (newValue == localValue) return;
 				localValue = value;
 				errors = [];
-				return initialState;
+				return 'view';
 			}
 		},
 		view: {
@@ -194,13 +189,13 @@
 			}
 		},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, displayText);
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -219,14 +214,27 @@
 				dispatch('exitedit');
 			},
 			focus() {},
-			focusout() {
-				dispatch('focusout');
+			change() {
+				if (debounceMs) {
+					clearTimeout(timer);
+					timer = setTimeout(() => {
+						dispatch('change', localValue);
+					}, debounceMs);
+				}
+			},
+			submit() {
+				clearTimeout(timer);
 				if (isDirty) {
 					dispatch('change', localValue);
 				}
+			},
+			focusout() {
+				dispatch('focusout');
+				this.submit();
 				return readonly ? 'readonly' : 'view';
 			},
 			cancel() {
+				clearTimeout(timer);
 				localValue = value;
 				dispatch('cancel');
 				return readonly ? 'readonly' : 'view';
@@ -249,6 +257,12 @@
 	});
 
 	$effect(() => {
+		if (!inEdit) {
+			localValue = value;
+		}
+	});
+
+	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
 		} else if (readonly && copyable && value != null) {
@@ -265,11 +279,11 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
-	role={config.role === 'inline' ? 'inline' : 'form'}
+	role={config.role ?? 'form'}
 	{csm}
 	grabber
 	{icon}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	clearable={false}
 	{error}
 	{copyIcon}
@@ -367,7 +381,8 @@
 		cursor: pointer;
 	}
 
-	.slider-grabber-track:focus {
+	.slider-grabber-track:focus,
+	.slider-grabber-track:focus-visible {
 		outline: none;
 	}
 

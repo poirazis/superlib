@@ -1,55 +1,53 @@
-<svelte:options runes={false} />
-
 <script>
-  import { getContext } from "svelte";
-  import SuperColumnRow from "./SuperColumnRow.svelte";
-  import SuperColumnRowNew from "./SuperColumnRowNew.svelte";
-  const columnSettings = getContext("stColumnOptions");
-  const columnState = getContext("stColumnState");
-  const stbVisibleRows = getContext("stbVisibleRows");
-  const new_row = getContext("new_row");
+	import SuperColumnRow from './SuperColumnRow.svelte';
+	import SuperColumnRowNew from './SuperColumnRowNew.svelte';
 
-  export let field;
-  export let idField;
-  export let isLast;
-  export let isFirst;
-  export let zebra;
-  export let rowHeight;
-  export let rows;
-
-  $: inserting = $columnState == "Inserting";
-  $: quiet = $columnSettings.quiet;
-  $: editing =
-    $columnState == "EditingCell" &&
-    ($columnSettings.highlighters == "vertical" ||
-      $columnSettings.highlighters == "both");
+	let {
+		columnOptions,
+		isLast,
+		isFirst,
+		isFirstInsertable,
+		rows,
+		visibleRows,
+		inserting,
+		columnState,
+		rowState,
+		stbState,
+		tableAPI,
+		newRow,
+		children
+	} = $props();
 </script>
 
 <div
-  class="super-column-body"
-  style:margin-top={"var(--super-column-top-offset)"}
-  tabindex="-1"
-  class:quiet
-  class:zebra
-  class:inserting
-  class:filtered={$columnState == "Filtered"}
-  class:is-editing={editing}
-  class:is-last={isLast}
+	class="super-column-body"
+	style:margin-top={'var(--super-column-top-offset)'}
+	tabindex="-1"
+	class:is-last={isLast}
 >
-  {#each $stbVisibleRows as index (index)}
-    <SuperColumnRow
-      {isLast}
-      {index}
-      row={rows[index]}
-      {field}
-      {idField}
-      disabled={inserting}
-      {rowHeight}
-    >
-      <slot />
-    </SuperColumnRow>
-  {/each}
-  {#if inserting}
-    <SuperColumnRowNew {isFirst} {isLast} row={$new_row} />
-  {/if}
+	{#each visibleRows as index (index)}
+		<SuperColumnRow
+			{isLast}
+			{index}
+			row={rows[index]}
+			disabled={inserting}
+			{columnOptions}
+			{columnState}
+			{rowState}
+			{stbState}
+			{tableAPI}
+		>
+			{@render children?.()}
+		</SuperColumnRow>
+	{/each}
+
+	{#if inserting}
+		<SuperColumnRowNew
+			{isFirstInsertable}
+			{isLast}
+			row={$newRow}
+			columnSettings={columnOptions}
+			{stbState}
+		/>
+	{/if}
 </div>

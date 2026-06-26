@@ -7,12 +7,12 @@
 		attachmentCopyText,
 		isImage,
 		isMultiAttachment,
-		mapCellRole,
 		normalizeAttachments,
 		uploadAttachments,
-		type AttachmentItem
-	} from './attachmentUtils.js';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard.js';
+		copyAndTransition,
+		deferJustCopied
+	} from './helpers.js';
+	import type { AttachmentItem } from './types.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -46,8 +46,7 @@
 	let currentIndex = $state(0);
 	let showModal = $state(false);
 	let modalImageIndex = $state(0);
-	let localvalue = $state<AttachmentItem[]>([]);
-	let originalValue = $state<AttachmentItem[] | AttachmentItem | null | undefined>();
+	let localValue = $derived<AttachmentItem[]>(value);
 
 	let config = $derived(cellOptions ?? {});
 	let multi = $derived(isMultiAttachment(fieldSchema));
@@ -62,20 +61,19 @@
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let onClickAction = $derived(config.onClickAction);
 
-
 	let canSelect = $derived(!readonly && !disabled && !isGallery);
 	let canDelete = $derived(!readonly && !disabled && !isGallery);
 	let slotted = $derived(config.slotted);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
-	let baseRole = $derived(mapCellRole(config.role));
+	let baseRole = $derived(config.role ?? 'form');
 
 	const aspectRatio = $derived(
 		imageRatio === 'landscape' ? '4 / 3' : imageRatio === 'square' ? '1 / 1' : '3 / 4'
 	);
 
 	const emitChange = (nextValue: AttachmentItem[]) => {
-		localvalue = nextValue;
+		localValue = nextValue;
 		dispatch('change', nextValue);
 	};
 
@@ -83,7 +81,7 @@
 		if (!API || !tableid) return [];
 		try {
 			const res = await uploadAttachments(API, tableid, fileList);
-			emitChange([...localvalue, ...res]);
+			emitChange([...localValue, ...res]);
 			return res;
 		} catch (error) {
 			console.error('Upload failed:', error);
@@ -92,7 +90,7 @@
 	};
 
 	const handleDelete = (key: number) => {
-		const next = [...localvalue];
+		const next = [...localValue];
 		next.splice(key, 1);
 		emitChange(next);
 	};
@@ -114,7 +112,7 @@
 	const deleteSelected = () => {
 		if (selectedIndices.size === 0) return;
 		const indicesToDelete = Array.from(selectedIndices).sort((a, b) => b - a);
-		const next = [...localvalue];
+		const next = [...localValue];
 		indicesToDelete.forEach((idx) => next.splice(idx, 1));
 		clearSelection();
 		emitChange(next);
@@ -132,44 +130,44 @@
 	};
 
 	const openModal = (index: number) => {
-		if (!disabled && !inBuilder && localvalue?.[index] && isImage(localvalue[index])) {
+		if (!disabled && !inBuilder && localValue?.[index] && isImage(localValue[index])) {
 			modalImageIndex = index;
 			showModal = true;
 		}
 	};
 
 	const carouselNext = () => {
-		if (localvalue?.length > 1) {
-			currentIndex = (currentIndex + 1) % localvalue.length;
+		if (localValue?.length > 1) {
+			currentIndex = (currentIndex + 1) % localValue.length;
 			dispatch('view', {
-				attachment: localvalue[currentIndex],
+				attachment: localValue[currentIndex],
 				index: currentIndex
 			});
 		}
 	};
 
 	const carouselPrev = () => {
-		if (localvalue?.length > 1) {
-			currentIndex = (currentIndex - 1 + localvalue.length) % localvalue.length;
+		if (localValue?.length > 1) {
+			currentIndex = (currentIndex - 1 + localValue.length) % localValue.length;
 			dispatch('view', {
-				attachment: localvalue[currentIndex],
+				attachment: localValue[currentIndex],
 				index: currentIndex
 			});
 		}
 	};
 
 	const carouselGoTo = (index: number) => {
-		if (index >= 0 && index < localvalue?.length) {
+		if (index >= 0 && index < localValue?.length) {
 			currentIndex = index;
 			dispatch('view', {
-				attachment: localvalue[currentIndex],
+				attachment: localValue[currentIndex],
 				index: currentIndex
 			});
 		}
 	};
 
 	const handleCarouselKeydown = (event: KeyboardEvent) => {
-		if (controlType === 'carousel' && localvalue?.length > 1) {
+		if (controlType === 'carousel' && localValue?.length > 1) {
 			if (event.key === 'ArrowLeft') {
 				event.preventDefault();
 				carouselPrev();
@@ -188,7 +186,7 @@
 		} else if (onClickAction === 'select') {
 			toggleSelection(index);
 		} else if (onClickAction === 'custom') {
-			const item = localvalue[index];
+			const item = localValue[index];
 			config.onItemClick?.({ item, index });
 		}
 	};
@@ -197,7 +195,10 @@
 		'*': {
 			goTo(state: string) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {},
@@ -210,13 +211,13 @@
 		},
 		copyable: {
 			_enter() {},
-			click() {
-				copyAndTransition(() => csm, attachmentCopyText(localvalue));
+			copy() {
+				copyAndTransition(() => csm, attachmentCopyText(localValue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -226,8 +227,7 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
-				localvalue = normalizeAttachments(value, multi);
+				localValue = normalizeAttachments(value, multi);
 				anchor?.focus();
 				dispatch('enteredit');
 			},
@@ -237,44 +237,43 @@
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!anchor?.contains(related)) {
-					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+					return readonly ? 'readonly' : 'editing';
 				}
 			},
 			submit(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!picker?.contains(related)) {
-					if (
-						JSON.stringify(localvalue) !==
-						JSON.stringify(normalizeAttachments(originalValue, multi))
-					) {
-						dispatch('change', localvalue);
+					if (isDirty) {
+						dispatch('change', localValue);
 					}
 					dispatch('focusout');
-					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+					return readonly ? 'readonly' : 'editing';
 				}
 			},
 			cancel() {
-				localvalue = normalizeAttachments(originalValue, multi);
-				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+				localValue = normalizeAttachments(value, multi);
+				return readonly ? 'readonly' : 'editing';
 			}
 		}
 	});
 
 	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(
+		inEdit && JSON.stringify(localValue) !== JSON.stringify(normalizeAttachments(value, multi))
+	);
 
 	$effect(() => {
-		localvalue = normalizeAttachments(value, multi);
+		if ($csm === 'editing') return;
+		localValue = normalizeAttachments(value, multi);
 	});
 
 	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && localvalue.length) {
+		} else if (readonly && copyable && localValue.length) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if (baseRole === 'inline') {
-			csm.goTo('view');
 		} else {
 			csm.goTo('editing');
 		}
@@ -301,278 +300,282 @@
 	{background}
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
-	{#if controlType == 'list'}
-		<div class="attachments" bind:this={picker}>
-			{#if localvalue?.length}
-				{#each localvalue as attachment, idx (idx)}
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
-						class="attachment"
-						class:focused={focusedOptionIdx === idx}
-						class:selected={selectedIndices.has(idx)}
-						on:mouseenter={() => (focusedOptionIdx = idx)}
-						on:click={() => toggleSelection(idx)}
-					>
-						<!-- svelte-ignore event_directive_deprecated -->
-						<button
-							class="btn-download"
-							on:click={() => handleDelete(idx)}
-							tabindex="-1"
-							aria-label="Download {attachment.name}"
-							title="Download {attachment.name}"
-							type="button"
-						>
-							<i class="ph ph-download-simple"></i>
-						</button>
-						<a href={attachment.url} class="filename">{attachment.name}</a>
-						{#if !readonly}
-							<!-- svelte-ignore event_directive_deprecated -->
-							<button
-								class="btn-delete"
-								on:click={() => handleDelete(idx)}
-								tabindex="-1"
-								aria-label="Delete"
-								title="Delete"
-								type="button"
+	{#key $csm}
+		{#key localValue}
+			{#if controlType == 'list'}
+				<div class="attachments" bind:this={picker}>
+					{#if localValue?.length}
+						{#each localValue as attachment, idx (idx)}
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="attachment"
+								class:focused={focusedOptionIdx === idx}
+								class:selected={selectedIndices.has(idx)}
+								on:mouseenter={() => (focusedOptionIdx = idx)}
+								on:click={() => toggleSelection(idx)}
 							>
-								<i class="ph ph-trash-simple"></i>
-							</button>
-						{/if}
-					</div>
-				{/each}
-			{/if}
-
-			{#if canAdd}
-				<!-- svelte-ignore event_directive_deprecated -->
-				<button
-					class="btn-upload-empty list"
-					style:margin-top={localvalue?.length ? '0.5rem' : '0'}
-					on:click={uploadNewAttachment}
-					aria-label="Upload attachment"
-					type="button"
-					disabled={disabled || readonly}
-				>
-					<i class="ph ph-plus"></i> Add Attachment
-				</button>
-			{/if}
-		</div>
-	{:else if controlType == 'carousel'}
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="carousel" on:keydown={handleCarouselKeydown}>
-			{#if localvalue?.length}
-				<div class="carousel-content">
-					{#if isImage(localvalue[currentIndex])}
-						<!-- svelte-ignore a11y_click_events_have_key_events -->
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class="carousel-image"
-							class:selected={selectedIndices.has(currentIndex)}
-							style="background-image: url('{localvalue[currentIndex].url}')"
-							aria-label={localvalue[currentIndex].name}
-							on:click={() => {
-								if (inEdit) onItemClick(currentIndex);
-							}}
-						>
-							{#if localvalue.length > 1 || canAdd}
-								<div class="carousel-controls">
-									{#if localvalue.length > 1}
-										<!-- svelte-ignore event_directive_deprecated -->
-										<button
-											class="btn-nav"
-											on:click|stopPropagation={carouselPrev}
-											aria-label="Previous attachment"
-											type="button"
-											{disabled}
-										>
-											<i class="ph ph-caret-left"></i>
-										</button>
-										<div class="indicators">
-											{#each localvalue as _, idx}
-												<!-- svelte-ignore event_directive_deprecated -->
-												<button
-													class="indicator"
-													class:active={idx === currentIndex}
-													on:click|stopPropagation={() => carouselGoTo(idx)}
-													aria-label="Go to attachment {idx + 1}"
-													type="button"
-													{disabled}
-												></button>
-											{/each}
-										</div>
-										<!-- svelte-ignore event_directive_deprecated -->
-										<button
-											class="btn-nav"
-											on:click|stopPropagation={carouselNext}
-											aria-label="Next attachment"
-											type="button"
-											{disabled}
-										>
-											<i class="ph ph-caret-right"></i>
-										</button>
-										<!-- svelte-ignore event_directive_deprecated -->
-										<button
-											class="btn-nav"
-											style="align-self: flex-end;"
-											on:click|stopPropagation={() => openModal(currentIndex)}
-											aria-label="Full Screen"
-											type="button"
-											{disabled}
-										>
-											<i class="ph ph-arrows-out-simple"></i>
-										</button>
-									{/if}
-									{#if canAdd}
-										<!-- svelte-ignore event_directive_deprecated -->
-										<button
-											class="btn-nav add"
-											style="align-self: flex-end;"
-											on:click|stopPropagation={uploadNewAttachment}
-											aria-label="Upload attachment"
-											type="button"
-										>
-											<i class="ph ph-upload"></i>
-										</button>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{:else if !isGallery}
-						<div class="carousel-fallback">
-							<div class="pill">{localvalue[currentIndex].extension?.toUpperCase()}</div>
-							<span class="filename">{localvalue[currentIndex].name}</span>
-						</div>
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button
+									class="btn-download"
+									on:click={() => handleDelete(idx)}
+									tabindex="-1"
+									aria-label="Download {attachment.name}"
+									title="Download {attachment.name}"
+									type="button"
+								>
+									<i class="ph ph-download-simple"></i>
+								</button>
+								<a href={attachment.url} class="filename">{attachment.name}</a>
+								{#if !readonly}
+									<!-- svelte-ignore event_directive_deprecated -->
+									<button
+										class="btn-delete"
+										on:click={() => handleDelete(idx)}
+										tabindex="-1"
+										aria-label="Delete"
+										title="Delete"
+										type="button"
+									>
+										<i class="ph ph-trash-simple"></i>
+									</button>
+								{/if}
+							</div>
+						{/each}
 					{/if}
-				</div>
-			{:else if !isGallery}
-				<div class="carousel-placeholder">
+
 					{#if canAdd}
 						<!-- svelte-ignore event_directive_deprecated -->
 						<button
-							class="btn-upload-empty"
+							class="btn-upload-empty list"
+							style:margin-top={localValue?.length ? '0.5rem' : '0'}
 							on:click={uploadNewAttachment}
 							aria-label="Upload attachment"
 							type="button"
 							disabled={disabled || readonly}
 						>
-							<i class="ph ph-plus"></i>
-							Upload Attachment
+							<i class="ph ph-plus"></i> Add Attachment
 						</button>
 					{/if}
 				</div>
-			{/if}
-		</div>
-	{:else if controlType == 'grid'}
-		<div class="attachment-grid-wrapper">
-			<div class="attachment-grid" style:--grid-columns={gridColumns}>
-				{#if localvalue?.length}
-					{#each localvalue as attachment, idx (idx)}
-						{#if isImage(attachment)}
-							<div
-								class="grid-item"
-								class:focused={focusedOptionIdx === idx}
-								class:selected={selectedIndices.has(idx)}
-								style="aspect-ratio: {aspectRatio}"
-							>
+			{:else if controlType == 'carousel'}
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="carousel" on:keydown={handleCarouselKeydown}>
+					{#if localValue?.length}
+						<div class="carousel-content">
+							{#if isImage(localValue[currentIndex])}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div
-									class="grid-image"
-									style="background-image: url('{attachment.url}');"
-									role="button"
-									tabindex="0"
-									aria-label={attachment.name}
-									on:click={() => onItemClick(idx)}
-									on:keydown={(e) => e.key === 'Enter' && toggleSelection(idx)}
+									class="carousel-image"
+									class:selected={selectedIndices.has(currentIndex)}
+									style="background-image: url('{localValue[currentIndex].url}')"
+									aria-label={localValue[currentIndex].name}
+									on:click={() => {
+										if (inEdit) onItemClick(currentIndex);
+									}}
 								>
-									{#if slotted}
-										<div class="slot-container">
-											{@render children?.()}
-										</div>
-									{/if}
-									{#if !isGallery && !readonly}
-										<div class="grid-overlay-top">
-											<!-- svelte-ignore event_directive_deprecated -->
-											<button
-												class="btn-grid-download"
-												on:click={() => {
-													const link = document.createElement('a');
-													link.href = attachment.url ?? '';
-													link.download = attachment.name ?? '';
-													document.body.appendChild(link);
-													link.click();
-													document.body.removeChild(link);
-												}}
-												tabindex="-1"
-												aria-label="Download {attachment.name}"
-												type="button"
-											>
-												<i class="ph ph-download-simple"></i>
-											</button>
-											<!-- svelte-ignore event_directive_deprecated -->
-											<button
-												class="btn-grid-delete"
-												on:click={() => handleDelete(idx)}
-												tabindex="-1"
-												aria-label="Delete {attachment.name}"
-												type="button"
-											>
-												<i class="ph ph-trash-simple"></i>
-											</button>
+									{#if localValue.length > 1 || canAdd}
+										<div class="carousel-controls">
+											{#if localValue.length > 1}
+												<!-- svelte-ignore event_directive_deprecated -->
+												<button
+													class="btn-nav"
+													on:click|stopPropagation={carouselPrev}
+													aria-label="Previous attachment"
+													type="button"
+													{disabled}
+												>
+													<i class="ph ph-caret-left"></i>
+												</button>
+												<div class="indicators">
+													{#each localValue as _, idx}
+														<!-- svelte-ignore event_directive_deprecated -->
+														<button
+															class="indicator"
+															class:active={idx === currentIndex}
+															on:click|stopPropagation={() => carouselGoTo(idx)}
+															aria-label="Go to attachment {idx + 1}"
+															type="button"
+															{disabled}
+														></button>
+													{/each}
+												</div>
+												<!-- svelte-ignore event_directive_deprecated -->
+												<button
+													class="btn-nav"
+													on:click|stopPropagation={carouselNext}
+													aria-label="Next attachment"
+													type="button"
+													{disabled}
+												>
+													<i class="ph ph-caret-right"></i>
+												</button>
+												<!-- svelte-ignore event_directive_deprecated -->
+												<button
+													class="btn-nav"
+													style="align-self: flex-end;"
+													on:click|stopPropagation={() => openModal(currentIndex)}
+													aria-label="Full Screen"
+													type="button"
+													{disabled}
+												>
+													<i class="ph ph-arrows-out-simple"></i>
+												</button>
+											{/if}
+											{#if canAdd}
+												<!-- svelte-ignore event_directive_deprecated -->
+												<button
+													class="btn-nav add"
+													style="align-self: flex-end;"
+													on:click|stopPropagation={uploadNewAttachment}
+													aria-label="Upload attachment"
+													type="button"
+												>
+													<i class="ph ph-upload"></i>
+												</button>
+											{/if}
 										</div>
 									{/if}
 								</div>
-							</div>
-						{:else if !isGallery}
-							<div
-								class="grid-item"
-								class:focused={focusedOptionIdx === idx}
-								class:selected={selectedIndices.has(idx)}
-								style="aspect-ratio: {aspectRatio}"
-							>
-								<div class="grid-fallback">
-									<div class="pill">{attachment.extension?.toUpperCase()}</div>
-									<span class="filename">{attachment.name}</span>
+							{:else if !isGallery}
+								<div class="carousel-fallback">
+									<div class="pill">{localValue[currentIndex].extension?.toUpperCase()}</div>
+									<span class="filename">{localValue[currentIndex].name}</span>
 								</div>
-							</div>
-						{/if}
-					{/each}
-
-					{#if canAdd}
-						<div class="grid-item grid-add-item" style="aspect-ratio: {aspectRatio}">
-							<!-- svelte-ignore event_directive_deprecated -->
-							<button
-								class="btn-upload-empty grid"
-								on:click={uploadNewAttachment}
-								aria-label="Upload attachment"
-								type="button"
-								disabled={disabled || readonly}
-							>
-								<i class="ph ph-plus"></i>
-								<span>Add Images</span>
-							</button>
+							{/if}
+						</div>
+					{:else if !isGallery}
+						<div class="carousel-placeholder">
+							{#if canAdd}
+								<!-- svelte-ignore event_directive_deprecated -->
+								<button
+									class="btn-upload-empty"
+									on:click={uploadNewAttachment}
+									aria-label="Upload attachment"
+									type="button"
+									disabled={disabled || readonly}
+								>
+									<i class="ph ph-plus"></i>
+									Upload Attachment
+								</button>
+							{/if}
 						</div>
 					{/if}
-				{:else}
-					<div class="grid-empty">
-						{#if canAdd}
-							<!-- svelte-ignore event_directive_deprecated -->
-							<button
-								class="btn-upload-empty grid"
-								on:click={uploadNewAttachment}
-								aria-label="Upload attachment"
-								type="button"
-								disabled={disabled || readonly}
-							>
-								<i class="ph ph-plus"></i>
-								<span>Add Images</span>
-							</button>
+				</div>
+			{:else if controlType == 'grid'}
+				<div class="attachment-grid-wrapper">
+					<div class="attachment-grid" style:--grid-columns={gridColumns}>
+						{#if localValue?.length}
+							{#each localValue as attachment, idx (idx)}
+								{#if isImage(attachment)}
+									<div
+										class="grid-item"
+										class:focused={focusedOptionIdx === idx}
+										class:selected={selectedIndices.has(idx)}
+										style="aspect-ratio: {aspectRatio}"
+									>
+										<!-- svelte-ignore a11y_click_events_have_key_events -->
+										<div
+											class="grid-image"
+											style="background-image: url('{attachment.url}');"
+											role="button"
+											tabindex="0"
+											aria-label={attachment.name}
+											on:click={() => onItemClick(idx)}
+											on:keydown={(e) => e.key === 'Enter' && toggleSelection(idx)}
+										>
+											{#if slotted}
+												<div class="slot-container">
+													{@render children?.()}
+												</div>
+											{/if}
+											{#if !isGallery && !readonly}
+												<div class="grid-overlay-top">
+													<!-- svelte-ignore event_directive_deprecated -->
+													<button
+														class="btn-grid-download"
+														on:click={() => {
+															const link = document.createElement('a');
+															link.href = attachment.url ?? '';
+															link.download = attachment.name ?? '';
+															document.body.appendChild(link);
+															link.click();
+															document.body.removeChild(link);
+														}}
+														tabindex="-1"
+														aria-label="Download {attachment.name}"
+														type="button"
+													>
+														<i class="ph ph-download-simple"></i>
+													</button>
+													<!-- svelte-ignore event_directive_deprecated -->
+													<button
+														class="btn-grid-delete"
+														on:click={() => handleDelete(idx)}
+														tabindex="-1"
+														aria-label="Delete {attachment.name}"
+														type="button"
+													>
+														<i class="ph ph-trash-simple"></i>
+													</button>
+												</div>
+											{/if}
+										</div>
+									</div>
+								{:else if !isGallery}
+									<div
+										class="grid-item"
+										class:focused={focusedOptionIdx === idx}
+										class:selected={selectedIndices.has(idx)}
+										style="aspect-ratio: {aspectRatio}"
+									>
+										<div class="grid-fallback">
+											<div class="pill">{attachment.extension?.toUpperCase()}</div>
+											<span class="filename">{attachment.name}</span>
+										</div>
+									</div>
+								{/if}
+							{/each}
+
+							{#if canAdd}
+								<div class="grid-item grid-add-item" style="aspect-ratio: {aspectRatio}">
+									<!-- svelte-ignore event_directive_deprecated -->
+									<button
+										class="btn-upload-empty grid"
+										on:click={uploadNewAttachment}
+										aria-label="Upload attachment"
+										type="button"
+										disabled={disabled || readonly}
+									>
+										<i class="ph ph-plus"></i>
+										<span>Add Images</span>
+									</button>
+								</div>
+							{/if}
+						{:else}
+							<div class="grid-empty">
+								{#if canAdd}
+									<!-- svelte-ignore event_directive_deprecated -->
+									<button
+										class="btn-upload-empty grid"
+										on:click={uploadNewAttachment}
+										aria-label="Upload attachment"
+										type="button"
+										disabled={disabled || readonly}
+									>
+										<i class="ph ph-plus"></i>
+										<span>Add Images</span>
+									</button>
+								{/if}
+							</div>
 						{/if}
 					</div>
-				{/if}
-			</div>
-		</div>
-	{/if}
+				</div>
+			{/if}
+		{/key}
+	{/key}
 
 	{#if selectedIndices.size > 0 && controlType === 'grid' && !readonly && !isGallery}
 		<div class="bulk-actions-overlay">
@@ -612,7 +615,7 @@
 	/>
 
 	<SuperLightbox
-		bind:items={localvalue}
+		bind:items={localValue}
 		bind:open={showModal}
 		bind:currentIndex={modalImageIndex}
 		bind:selectedIndices

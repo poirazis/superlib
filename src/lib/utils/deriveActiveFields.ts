@@ -6,6 +6,7 @@ type SchemaField = {
 	subtype?: string;
 	schema?: Record<string, SchemaField>;
 	autocolumn?: boolean;
+	readonly?: boolean;
 	visible?: boolean;
 	nestedJSON?: boolean;
 	default?: unknown;
@@ -27,6 +28,7 @@ type ActiveField = ConfiguredField & {
 	name: string;
 	special?: boolean;
 	hidden?: boolean;
+	readonly?: boolean;
 	defaultValue?: unknown;
 };
 
@@ -96,6 +98,7 @@ export function deriveActiveFields(
 				placeholder: beautifyLabel(field.label || field.name),
 				special: useSpecialFields && specialFields.includes(field.name),
 				hidden: field.visible === false,
+				readonly: field.type === 'formula' || field.readonly === true,
 				defaultValue:
 					useSpecialFields && field.name === 'created_by'
 						? currentUserEmail || 'system'
@@ -209,5 +212,5 @@ export function resolveFieldInnerType(
 	}
 
 	if (!innerType) return null;
-	return fieldSchemaName.startsWith('fk_self_') ? 'link' : innerType;
+	return innerType;
 }

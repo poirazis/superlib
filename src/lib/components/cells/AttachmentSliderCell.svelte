@@ -9,12 +9,13 @@
 		attachmentCopyText,
 		isImage,
 		isMultiAttachment,
-		mapCellRole,
+
 		normalizeAttachments,
 		uploadAttachments,
-		type AttachmentItem
-	} from './attachmentUtils.js';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard.js';
+		copyAndTransition,
+		deferJustCopied
+	} from './helpers.js';
+	import type { AttachmentItem } from './types.js';
 
 	const dispatch = createEventDispatcher<{
 		change: AttachmentItem[];
@@ -45,8 +46,7 @@
 	let currentIndex = $state(0);
 	let showModal = $state(false);
 	let modalImageIndex = $state(0);
-	let localvalue = $state<AttachmentItem[]>([]);
-	let originalValue = $state<AttachmentItem[] | AttachmentItem | null | undefined>();
+	let localValue = $state<AttachmentItem[]>([]);
 
 	let config = $derived(cellOptions ?? {});
 	let multi = $derived(isMultiAttachment(fieldSchema));
@@ -63,17 +63,17 @@
 	let slotted = $derived(config.slotted);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
-	let baseRole = $derived(mapCellRole(config.role));
+	let baseRole = $derived(config.role ?? 'form');
 	let onClickAction = $derived(config.onClickAction);
 
 	let dots = $derived(
-		config.carouselDots !== undefined ? config.carouselDots : (localvalue?.length ?? 0) > 1
+		config.carouselDots !== undefined ? config.carouselDots : (localValue?.length ?? 0) > 1
 	);
 	let arrows = $derived(
-		config.carouselArrows !== undefined ? config.carouselArrows : (localvalue?.length ?? 0) > 1
+		config.carouselArrows !== undefined ? config.carouselArrows : (localValue?.length ?? 0) > 1
 	);
 	let infinite = $derived(
-		config.carouselInfinite !== undefined ? config.carouselInfinite : (localvalue?.length ?? 0) > 1
+		config.carouselInfinite !== undefined ? config.carouselInfinite : (localValue?.length ?? 0) > 1
 	);
 	let autoplay = $derived(config.carouselAutoplay !== undefined ? config.carouselAutoplay : false);
 	let duration = $derived(
@@ -88,7 +88,7 @@
 	let marquee = $derived(config.carouselMode === 'marquee');
 
 	const emitChange = (nextValue: AttachmentItem[]) => {
-		localvalue = nextValue;
+		localValue = nextValue;
 		dispatch('change', nextValue);
 	};
 
@@ -96,7 +96,7 @@
 		if (!API || !tableid) return [];
 		try {
 			const res = await uploadAttachments(API, tableid, fileList);
-			emitChange([...localvalue, ...res]);
+			emitChange([...localValue, ...res]);
 			return res;
 		} catch (error) {
 			console.error('Upload failed:', error);
@@ -105,7 +105,7 @@
 	};
 
 	const handleDelete = (key: number) => {
-		const next = [...localvalue];
+		const next = [...localValue];
 		next.splice(key, 1);
 		emitChange(next);
 	};
@@ -132,7 +132,7 @@
 	};
 
 	const openModal = (index: number = currentIndex) => {
-		if (!disabled && !inBuilder && localvalue?.[index] && isImage(localvalue[index])) {
+		if (!disabled && !inBuilder && localValue?.[index] && isImage(localValue[index])) {
 			modalImageIndex = index;
 			showModal = true;
 		}
@@ -146,7 +146,7 @@
 		} else if (onClickAction === 'select') {
 			toggleSelection(index);
 		} else if (onClickAction === 'custom') {
-			const item = localvalue[index];
+			const item = localValue[index];
 			config.onItemClick?.({ item, index });
 		}
 	};
@@ -155,7 +155,10 @@
 		'*': {
 			goTo(state: string) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {},
@@ -168,13 +171,13 @@
 		},
 		copyable: {
 			_enter() {},
-			click() {
-				copyAndTransition(() => csm, attachmentCopyText(localvalue));
+			copy() {
+				copyAndTransition(() => csm, attachmentCopyText(localValue));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -184,8 +187,7 @@
 		},
 		editing: {
 			_enter() {
-				originalValue = value;
-				localvalue = normalizeAttachments(value, multi);
+				localValue = normalizeAttachments(value, multi);
 				anchor?.focus();
 				dispatch('enteredit');
 			},
@@ -195,29 +197,34 @@
 			focusout(e: FocusEvent) {
 				const related = e.relatedTarget as Node | null;
 				if (!anchor?.contains(related)) {
-					return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+					return readonly ? 'readonly' : 'editing';
 				}
 			},
 			cancel() {
-				localvalue = normalizeAttachments(originalValue, multi);
-				return readonly ? 'readonly' : baseRole === 'inline' ? 'view' : 'editing';
+				localValue = normalizeAttachments(value, multi);
+				return readonly ? 'readonly' : 'editing';
 			}
 		}
 	});
 
+	let inEdit = $derived($csm === 'editing');
+	let isDirty = $derived(
+		inEdit &&
+			JSON.stringify(localValue) !== JSON.stringify(normalizeAttachments(value, multi))
+	);
+
 	$effect(() => {
-		localvalue = normalizeAttachments(value, multi);
+		if ($csm === 'editing') return;
+		localValue = normalizeAttachments(value, multi);
 	});
 
 	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && localvalue.length) {
+		} else if (readonly && copyable && localValue.length) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
-		} else if (baseRole === 'inline') {
-			csm.goTo('view');
 		} else {
 			csm.goTo('editing');
 		}
@@ -245,7 +252,7 @@
 	tabindex={disabled || (readonly && !copyable) ? -1 : 0}
 >
 	<div class="slider">
-		{#if localvalue?.length}
+		{#if localValue?.length}
 			{#key particlesToShow}
 				<Carousel
 					{particlesToShow}
@@ -262,7 +269,7 @@
 					<div slot="prev" let:showPrevPage on:click={showPrevPage} class="slider-navbutton">
 						<i class="ph ph-caret-left"></i>
 					</div>
-					{#each localvalue as attachment, idx (idx)}
+					{#each localValue as attachment, idx (idx)}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="slider-item" style:height={'100%'} on:click={() => onItemClick(idx)}>
@@ -322,7 +329,7 @@
 	/>
 
 	<SuperLightbox
-		bind:items={localvalue}
+		bind:items={localValue}
 		bind:open={showModal}
 		bind:currentIndex={modalImageIndex}
 		bind:selectedIndices

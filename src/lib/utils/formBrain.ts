@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 import type { Writable } from 'svelte/store';
 import {
 	fieldComponentMap,
@@ -8,7 +7,7 @@ import {
 import { deriveActiveFields, resolveFieldInnerType } from './deriveActiveFields.ts';
 
 export type FormBrainOptions = {
-	schemaStore: { subscribe: Writable<Record<string, unknown>>['subscribe']; set?: (v: Record<string, unknown>) => void };
+	getSchema: () => Record<string, unknown>;
 	beautifyLabels?: boolean;
 	useSpecialFields?: boolean;
 	labelPosition?: string;
@@ -16,7 +15,6 @@ export type FormBrainOptions = {
 	relViewMode?: string;
 	actionType?: string;
 	currentUserEmail?: string;
-	ownId?: string | number;
 	getReactiveProps?: () => Record<string, unknown>;
 };
 
@@ -33,12 +31,7 @@ function sanitizeFieldProps(field: Record<string, unknown>) {
 export function beautifyLabel(label: string | undefined, enabled = true): string | undefined {
 	if (!enabled || !label) return label;
 
-	let fields = label.split('.');
-	if (label.startsWith('fk_self_')) {
-		fields = ['Parent'];
-	}
-
-	fields = fields.map((field) => {
+	const fields = label.split('.').map((field) => {
 		const words = field.split('_').map((word) => {
 			if (!word) return word;
 			return word[0]?.toUpperCase() + word.slice(1);
@@ -51,7 +44,7 @@ export function beautifyLabel(label: string | undefined, enabled = true): string
 
 export function createFormBrain(options: FormBrainOptions) {
 	const {
-		schemaStore,
+		getSchema,
 		beautifyLabels = true,
 		useSpecialFields = true,
 		labelPosition = 'top',
@@ -59,7 +52,6 @@ export function createFormBrain(options: FormBrainOptions) {
 		relViewMode = 'text',
 		actionType = 'Create',
 		currentUserEmail,
-		ownId,
 		getReactiveProps
 	} = options;
 
@@ -67,44 +59,46 @@ export function createFormBrain(options: FormBrainOptions) {
 
 	const brain = {
 		getComponentForField(field: { field?: string; name?: string }) {
-			const schema = get(schemaStore as Writable<Record<string, unknown>>) as Record<string, unknown>;
+			const schema = getSchema();
 			const innerType = resolveFieldInnerType(schema as never, field, useSpecialFields);
 			if (!innerType) return null;
 			return fieldComponentMap[innerType] || getDefaultFieldComponent();
 		},
 		getPropsForField(field: Record<string, unknown>, _idx?: number | Record<string, unknown>) {
 			const reactive = getReactiveProps?.() ?? {};
-			const currentLabelPosition = (reactive.labelPosition as string) ?? labelPosition;
-			const resolvedLabelPosition =
-				currentLabelPosition === 'top' || currentLabelPosition === 'left'
-					? 'fieldGroup'
-					: currentLabelPosition;
 			const currentOptionsViewMode = (reactive.optionsViewMode as string) ?? optionsViewMode;
 			const currentRelViewMode = (reactive.relViewMode as string) ?? relViewMode;
 			const currentActionType = (reactive.actionType as string) ?? actionType;
 			const currentUseSpecialFields =
 				(reactive.useSpecialFields as boolean | undefined) ?? useSpecialFields;
-			const currentOwnId = (reactive.ownId as string | number | undefined) ?? ownId;
-			const currentDisabled = (reactive.disabled as boolean | undefined) ?? false;
+			const currentShowDirty = (reactive.showDirty as boolean | undefined) ?? false;
 			const fieldName = (field.field || field.name) as string;
+			const schema = getSchema();
+			const schemaField = fieldName.includes('.')
+				? schema[fieldName.split('.')[0]]
+				: schema[fieldName];
+			const schemaFieldType = schemaField?.type as string | undefined;
+			const readonlyFromSchema =
+				schemaFieldType === 'formula' || Boolean(schemaField?.readonly);
 
 			return {
 				...sanitizeFieldProps(field),
+				span: Number(field.span) || 6,
 				label: label(field.label as string | undefined),
-				labelPosition: resolvedLabelPosition,
+				labelPosition:
+					field.labelPosition != null && field.labelPosition !== ''
+						? field.labelPosition
+						: 'fieldGroup',
 				placeholder:
 					currentActionType !== 'View' ? label(field.placeholder as string | undefined) : ' ',
-				useOptionColors: true,
 				optionsViewMode: currentOptionsViewMode,
 				relViewMode: currentRelViewMode,
-				disabled: currentDisabled,
-				readonly: field.readonly,
+				disabled: Boolean(field.disabled),
+				readonly: Boolean(field.readonly) || readonlyFromSchema,
 				autocomplete: field.autocomplete,
-				role: 'form',
-				showDirty: true,
+				showDirty: currentShowDirty,
 				direction: field.direction === 'vertical' ? 'column' : 'row',
 				invisible: currentUseSpecialFields && field.special,
-				ownId: currentOwnId,
 				defaultValue:
 					currentUseSpecialFields && brain.isSpecial(fieldName)
 						? brain.enrichSpecialField(field, currentActionType)
@@ -129,7 +123,7 @@ export function createFormBrain(options: FormBrainOptions) {
 			fieldsStore: Array<Record<string, unknown>> | null | undefined,
 			expandJsonFields = true
 		) {
-			const schema = get(schemaStore as Writable<Record<string, unknown>>) as Record<string, unknown>;
+			const schema = getSchema();
 			return deriveActiveFields(fieldsStore as never, schema as never, {
 				beautifyLabel: label,
 				useSpecialFields,
@@ -141,17 +135,19 @@ export function createFormBrain(options: FormBrainOptions) {
 			steps: Writable<Array<Record<string, unknown>>>,
 			section: Record<string, unknown>
 		) {
+			let resolvedOrder = 1;
 			steps.update((currentSteps) => {
 				const existingIndex = currentSteps.findIndex((s) => s.id == section.id);
 				if (existingIndex >= 0) {
-					currentSteps[existingIndex] = section;
-					return [...currentSteps];
+					resolvedOrder = existingIndex + 1;
+					const next = [...currentSteps];
+					next[existingIndex] = section;
+					return next;
 				}
+				resolvedOrder = currentSteps.length + 1;
 				return [...currentSteps, section];
 			});
-			const current = get(steps);
-			const index = current.findIndex((s) => s.id == section.id);
-			return index >= 0 ? index + 1 : current.length;
+			return resolvedOrder;
 		},
 		unregisterStep(steps: Writable<Array<Record<string, unknown>>>, section: { id: unknown }) {
 			steps.update((currentSteps) => currentSteps.filter((s) => s.id != section.id));

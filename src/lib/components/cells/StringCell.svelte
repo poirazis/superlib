@@ -1,22 +1,22 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext, untrack } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import fsm from 'svelte-fsm';
 	import BaseCell from './BaseCell.svelte';
-	import { copyAndTransition, deferJustCopied } from './cellClipboard';
+	import { copyAndTransition, deferJustCopied } from './helpers';
+	import { resolveEmptyViewText } from './helpers';
+
 	import { tooltip } from '../../actions/tooltip';
-	import Button from '../Button.svelte';
 
 	const dispatch = createEventDispatcher();
-	const { processStringSync } = getContext('sdk');
 
 	let {
 		id,
 		value,
+		displayValue = undefined,
 		cellOptions = {
-			role: 'form',
-			initialState: 'view',
-			debounce: 250
+			role: 'form'
 		},
+		autofocus = false,
 		buttons = []
 	} = $props();
 
@@ -28,26 +28,18 @@
 
 	// Destructure cellOptions reactively (must be before FSM because FSM methods close over these)
 	let config = $derived(cellOptions ?? {});
-	let initialState = $derived(config.initialState || 'view');
-	let formattedValue = $derived.by(() => {
-		if (config.template && value) {
-			return processStringSync(config.template, { value });
-		}
-		return value;
-	});
+	let viewText = $derived(typeof displayValue === 'string' ? displayValue : value);
 
 	let controlType = $derived(config.controlType);
-	let clearable = $derived(
-		config.clearValue === true && config.role !== 'inline' && $csm === 'editing' && localValue
-	);
+	let clearable = $derived(config.clearable && localValue && $csm === 'editing');
 
 	let readonly = $derived(config.readonly);
 	let optionError = $derived(config.error);
 	let icon = $derived(config.icon);
 	let color = $derived(config.color);
 	let background = $derived(config.background);
-	let showDirty = $derived(config.showDirty);
-	let debounceDelay = $derived(config.debounce);
+
+	let debounceMs = $derived(config.debounce ?? null);
 	let copyable = $derived(config.copyable);
 	let copyIcon = $derived(config.copyIcon ?? 'always');
 	let disabled = $derived(config.disabled);
@@ -55,10 +47,12 @@
 	// Derived values that do not depend on $csm
 	let error = $derived(optionError || errors.length > 0);
 
-	let isDirty = $derived(value != localValue);
+	let showDirty = $derived(config.showDirty);
+	let dirty = $derived(config.dirty);
 	let textarea = $derived(controlType === 'textarea');
 	let inEdit = $derived($csm === 'editing');
-	let isEmpty = $derived(!formattedValue && formattedValue !== 0);
+	let isDirty = $derived(inEdit && value != localValue);
+	let isEmpty = $derived(!viewText && viewText !== 0);
 
 	let tabindex = $state(0);
 
@@ -67,14 +61,14 @@
 		'*': {
 			goTo(state) {
 				return state;
-			}
+			},
+			copy() {},
+			click() {},
+			toggle() {}
 		},
 		view: {
 			_enter() {
 				localValue = value;
-			},
-			click() {
-				return this.focus();
 			},
 			focus(e) {
 				if (!readonly && !disabled) {
@@ -84,13 +78,13 @@
 		},
 		readonly: {},
 		copyable: {
-			click() {
+			copy() {
 				copyAndTransition(() => csm, String(value ?? ''));
 			},
 			keydown(e) {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					this.click();
+					this.copy();
 				}
 			}
 		},
@@ -98,6 +92,7 @@
 		disabled: {},
 		editing: {
 			_enter() {
+				localValue = value;
 				dispatch('enteredit');
 				setTimeout(() => {
 					editor?.focus();
@@ -109,8 +104,9 @@
 			focus() {},
 			clear() {
 				localValue = null;
-				if (debounceDelay) {
-					dispatch('change', localValue);
+				if (debounceMs) {
+					clearTimeout(timer);
+					timer = setTimeout(() => dispatch('change', localValue), debounceMs);
 				}
 
 				dispatch('clear', null);
@@ -120,24 +116,26 @@
 				this.submit();
 			},
 			submit() {
+				clearTimeout(timer);
 				if (isDirty) {
 					dispatch('change', localValue);
 				}
-				return initialState;
+				return 'view';
 			},
 			cancel() {
+				clearTimeout(timer);
 				localValue = value;
 				dispatch('cancel');
-				return initialState;
+				return 'view';
 			},
-			debounce(e) {
+			change(e) {
 				const target = e.target;
 				localValue = target.value;
-				if (debounceDelay) {
+				if (debounceMs) {
 					clearTimeout(timer);
 					timer = setTimeout(() => {
 						dispatch('change', localValue);
-					}, debounceDelay);
+					}, debounceMs);
 				}
 			},
 			keydown(e) {
@@ -153,18 +151,25 @@
 
 	// Lifecycle via effect (replaces onMount + onDestroy)
 	$effect(() => {
-		// cleanup
-		return () => {
-			if (timer) {
-				clearTimeout(timer);
-			}
-		};
+		if (autofocus) {
+			setTimeout(() => {
+				csm.focus();
+			}, 50);
+		}
+
+		return () => clearTimeout(timer);
+	});
+
+	$effect(() => {
+		if (!inEdit) {
+			localValue = value;
+		}
 	});
 
 	$effect(() => {
 		if (disabled) {
 			csm.goTo('disabled');
-		} else if (readonly && copyable && value) {
+		} else if (readonly && copyable) {
 			csm.goTo('copyable');
 		} else if (readonly) {
 			csm.goTo('readonly');
@@ -174,9 +179,6 @@
 
 		tabindex = readonly || disabled ? -1 : 0;
 	});
-
-	$inspect('localValue', localValue);
-	$inspect('value', value);
 </script>
 
 <!-- svelte-ignore event_directive_deprecated -->
@@ -184,14 +186,15 @@
 <!-- svelte-ignore a11y_interactive_supports_focus -->
 <BaseCell
 	{id}
-	role={config.role}
+	role={config.role ?? 'form'}
 	{csm}
 	{icon}
 	multirow={controlType == 'textarea'}
-	isDirty={isDirty && showDirty}
+	isDirty={dirty && showDirty}
 	{clearable}
 	{error}
 	{copyIcon}
+	align={cellOptions.align}
 	{color}
 	{background}
 	{buttons}
@@ -205,7 +208,8 @@
 					class:placeholder={!localValue}
 					placeholder={cellOptions?.placeholder}
 					value={localValue}
-					on:input={csm.debounce}
+					on:input={csm.change}
+					on:focusout={csm.focusout}
 					on:keydown={csm.keydown}
 				></textarea>
 			{:else}
@@ -217,29 +221,33 @@
 					value={localValue}
 					placeholder={cellOptions?.placeholder}
 					style:text-align={cellOptions.align}
-					on:input={csm.debounce}
+					on:input={csm.change}
 					on:focusout={csm.focusout}
 					on:keydown={csm.keydown}
 				/>
 			{/if}
 		{:else}
-			<span class="value" class:placeholder={isEmpty}>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="value-content"
-					use:tooltip
-					style:text-align={cellOptions.align}
-					on:click={csm.click}
-				>
-					{isEmpty ? cellOptions?.placeholder : formattedValue}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="value-contents"
+				class:placeholder={isEmpty}
+				class:textarea
+				use:tooltip
+				style:text-align={cellOptions.align}
+			>
+				<div class="value">
+					{isEmpty
+						? resolveEmptyViewText(cellOptions?.placeholder, config.role, inEdit)
+						: viewText}
 				</div>
-			</span>
+			</div>
 		{/if}
 	{/key}
 </BaseCell>
 
 <style>
-	span.value {
+	.value-contents {
+		font-size: 13px;
 		min-width: 0;
 		max-width: 100%;
 		flex: 1 1 auto;
@@ -251,24 +259,37 @@
 		border: none;
 		outline: none;
 		cursor: inherit;
-		padding: 0.25rem 0.75rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		padding: var(--super-cell-padding);
 	}
 
-	.value-content {
-		min-width: 0;
-		flex: 1;
-		font-style: inherit;
-		font-size: 13px;
-		text-overflow: ellipsis;
-		overflow: hidden;
-		white-space: nowrap;
-	}
-
-	.value.placeholder .value-content {
+	.value-contents.placeholder {
 		color: var(--spectrum-global-color-gray-500);
 		font-style: italic !important;
+	}
+
+	.value {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-style: inherit;
+	}
+
+	.value-contents.textarea {
+		align-items: flex-start;
+		align-self: stretch;
+		height: auto;
+		min-height: 100%;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+		overflow: auto;
+		padding: var(--super-cell-padding);
+	}
+
+	.value-contents.textarea .value {
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+		text-overflow: unset;
+		overflow: visible;
 	}
 </style>

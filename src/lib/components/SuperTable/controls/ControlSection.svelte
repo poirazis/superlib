@@ -1,5 +1,7 @@
-<svelte:options runes={false} />
+<script>
+  let { children } = $props();
+</script>
 
 <div class="st-control-columns">
-  <slot />
+  {@render children?.()}
 </div>

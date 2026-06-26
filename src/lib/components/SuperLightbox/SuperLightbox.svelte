@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import type { AttachmentItem } from '../cells/attachmentUtils.js';
-	import { isImage } from '../cells/attachmentUtils.js';
+	import type { AttachmentItem } from '../cells/types.js';
+	import { isImage } from '../cells/helpers.js';
 
 	const dispatch = createEventDispatcher<{
 		close: void;
