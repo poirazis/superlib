@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { setContext, getContext, createEventDispatcher, untrack } from 'svelte';
+
+	// derived/writable imported for external store APIs (formState, currentStep) - not replaceable with runes.
+	import type { Readable, Writable } from 'svelte/store';
+	import { derived, get, writable } from 'svelte/store';
+
 	import FormFieldGrid from './FormFieldGrid.svelte';
 	import { buildFormDataContext } from '../../utils/formContext.ts';
 	import { cloneDeep, deepGet, deepSet } from '../../utils/objectUtils.ts';
 	import { generate as uuid } from 'shortid';
-	import type { Readable, Writable } from 'svelte/store';
-	import { derived, get, writable } from 'svelte/store';
 	import type {
 		DataFetchDatasource,
 		FieldSchema,
@@ -14,7 +17,6 @@
 		TableSchema,
 		UIFieldValidationRule
 	} from '@budibase/types';
-
 	const dispatch = createEventDispatcher();
 
 	type FieldInfo<T = any> = {
@@ -88,7 +90,9 @@
 	const { Provider, ActionTypes, createValidatorFromConstraints, ContextScopes } =
 		getContext('sdk');
 
-	let fields = $state<Writable<FieldInfo>[]>([]);
+	// Use a Map keyed by field name for O(1) lookups instead of linear array scan.
+	let fieldsMap = $state<Map<string, Writable<FieldInfo>>>(new Map());
+
 	export const formState = writable({
 		values: {},
 		errors: {},
@@ -97,37 +101,21 @@
 		currentStep: 1
 	});
 
-	let values = $state<Record<string, any>>({});
-	let errors = $state<Record<string, any>>({});
-	let enrichments = $state<Record<string, string>>({});
-	let dirty = $state(false);
-	let currentStepValid = $state(true);
-	let currentStepValue = $state(1);
-
-	let valid = $derived(!Object.values(errors).some((error) => error != null));
+	// --- Helpers ---------------------------------------------------------------
 
 	const recordsEqual = (a: Record<string, any>, b: Record<string, any>): boolean => {
 		const keysA = Object.keys(a);
 		const keysB = Object.keys(b);
-		if (keysA.length !== keysB.length) {
-			return false;
-		}
+		if (keysA.length !== keysB.length) return false;
 		return keysA.every((key) => a[key] === b[key]);
 	};
 
-	const deriveFieldProperty = (
-		fieldStores: Readable<FieldInfo>[],
-		getProp: (_field: FieldInfo) => any
-	) => {
-		return derived(fieldStores, (fieldValues) => {
-			return fieldValues.reduce((map, field) => ({ ...map, [field.name]: getProp(field) }), {});
-		});
-	};
-
-	const deriveDirtyStatus = (fieldStores: Readable<FieldInfo>[]) => {
-		return derived(fieldStores, (fieldValues) => {
-			return fieldValues.some((field) => field.fieldState.dirty);
-		});
+	const sanitiseValue = (value: any, schema: FieldSchema | undefined, type: `${FieldType}`) => {
+		if (Array.isArray(value) && type === 'array' && schema) {
+			const options = schema?.constraints?.inclusion || [];
+			return value.map((opt) => String(opt)).filter((opt) => options.includes(opt));
+		}
+		return value;
 	};
 
 	const fieldValuesEqual = (a: any, b: any): boolean => {
@@ -146,63 +134,79 @@
 		return true;
 	};
 
-	const deriveBindingEnrichments = (fieldStores: Readable<FieldInfo>[]) => {
-		return derived(fieldStores, (fieldValues) => {
-			const enrichments: Record<string, string> = {};
-			fieldValues.forEach((field) => {
-				if (field.type === 'attachment' || field.type === 'attachment_single') {
-					const value = field.fieldState.value;
-					let url = null;
-					if (Array.isArray(value) && value[0] != null) {
-						url = value[0].url;
-					} else if (value && typeof value === 'object' && 'url' in value) {
-						url = (value as { url?: string }).url ?? null;
-					}
-					enrichments[`${field.name}_first`] = url;
-				}
-			});
-			return enrichments;
-		});
-	};
+	// --- Top-level reactive derivations ---------------------------------------
+	// These replace the per-effect derived() calls that were previously recreated
+	// on every fields change. They are computed once and re-evaluated only when
+	// their inputs actually change.
 
-	const deriveFormValue = (
-		initialValues: Record<string, any> | undefined,
-		values: Record<string, any>,
-		enrichments: Record<string, string>
-	) => {
-		let formValue = cloneDeep(initialValues || {});
-		const sortedFields = Object.entries(values || {})
-			.map(([key, value]) => {
-				const field = getField(key);
-				return {
-					key,
-					value,
-					lastUpdate: get(field).fieldState?.lastUpdate || 0
-				};
-			})
-			.sort((a, b) => {
-				return a.lastUpdate - b.lastUpdate;
-			});
-
-		sortedFields.forEach(({ key, value }) => {
-			deepSet(formValue, key, value);
-		});
-		Object.entries(enrichments || {}).forEach(([key, value]) => {
-			deepSet(formValue, key, value);
-		});
-		return formValue;
-	};
-
-	const getField = (name: string) => {
-		return fields.find((field) => get(field).name === name)!;
-	};
-
-	const sanitiseValue = (value: any, schema: FieldSchema | undefined, type: `${FieldType}`) => {
-		if (Array.isArray(value) && type === 'array' && schema) {
-			const options = schema?.constraints?.inclusion || [];
-			return value.map((opt) => String(opt)).filter((opt) => options.includes(opt));
+	const allFieldValues = $derived.by(() => {
+		let result: Record<string, any> = {};
+		for (const [, store] of fieldsMap) {
+			const f = get(store);
+			result[f.name] = f.fieldState.value;
 		}
-		return value;
+		return result;
+	});
+
+	const allFieldErrors = $derived.by(() => {
+		let result: Record<string, any> = {};
+		for (const [, store] of fieldsMap) {
+			const f = get(store);
+			result[f.name] = f.fieldState.error;
+		}
+		return result;
+	});
+
+	const allFieldDirtyStatus = $derived.by(() => {
+		let dirty = false;
+		for (const [, store] of fieldsMap) {
+			if (get(store).fieldState.dirty) {
+				dirty = true;
+				break;
+			}
+		}
+		return dirty;
+	});
+
+	const bindingEnrichments = $derived.by(() => {
+		const enrichments: Record<string, string> = {};
+		for (const [, store] of fieldsMap) {
+			const f = get(store);
+			if (f.type === 'attachment' || f.type === 'attachment_single') {
+				const value = f.fieldState.value;
+				let url: string | null = null;
+				if (Array.isArray(value) && value[0] != null) {
+					url = value[0].url;
+				} else if (value && typeof value === 'object' && 'url' in value) {
+					url = (value as { url?: string }).url ?? null;
+				}
+				enrichments[`${f.name}_first`] = url;
+			}
+		}
+		return enrichments;
+	});
+
+	const isCurrentStepValid = $derived.by(() => {
+		const stepVal = get(currentStep);
+		for (const [, store] of fieldsMap) {
+			const f = get(store);
+			if (f.step === stepVal && f.fieldState.error != null) return false;
+		}
+		return true;
+	});
+
+	// --- Derived form values ---------------------------------------------------
+	const values = $derived(allFieldValues);
+	const errors = $derived(allFieldErrors);
+	let dirty = $derived(allFieldDirtyStatus);
+	let currentStepValue = $derived(get(currentStep));
+	let currentStepValid = $derived(isCurrentStepValid);
+	let valid = $derived(!Object.values(errors).some((error) => error != null));
+
+	// --- Form API --------------------------------------------------------------
+
+	const getFieldStore = (name: string): Writable<FieldInfo> | undefined => {
+		return fieldsMap.get(name);
 	};
 
 	const formApi = {
@@ -215,9 +219,8 @@
 			validationRules: UIFieldValidationRule[],
 			step: number = 1
 		) => {
-			if (!field) {
-				return;
-			}
+			if (!field) return;
+
 			const schemaConstraints = disableSchemaValidation ? null : schema?.[field]?.constraints;
 			const validator = createValidatorFromConstraints(
 				schemaConstraints,
@@ -229,11 +232,12 @@
 			defaultValue = sanitiseValue(defaultValue, schema?.[field], type);
 
 			const loadedValue = deepGet(initialValues, field) ?? defaultValue;
-			const existingField = fields.find((info) => get(info).name === field);
+			const existingField = fieldsMap.get(field);
 			const isAutoColumn = !!schema?.[field]?.autocolumn;
 
 			if (existingField) {
-				const { fieldState } = get(existingField);
+				// --- Update existing field -----------------------------------------
+				const fieldState = get(existingField).fieldState;
 				const loadedFromRow = deepGet(initialValues, field);
 				const shouldSyncValue =
 					!fieldState.dirty &&
@@ -241,8 +245,9 @@
 					loadedFromRow !== '' &&
 					!fieldValuesEqual(fieldState.value, loadedFromRow);
 
-				let nextValue = fieldState.value;
-				let nextInitialValue = fieldState.initialValue ?? loadedValue;
+				let nextValue: any;
+				let nextInitialValue: any;
+
 				if (shouldSyncValue) {
 					nextValue = loadedFromRow;
 					nextInitialValue = loadedFromRow;
@@ -279,8 +284,9 @@
 				return existingField;
 			}
 
-			let fieldValue = loadedValue;
-			let initialError = null;
+			// --- Register new field --------------------------------------------------
+			const fieldValue = loadedValue;
+			let initialError: string | null = null;
 			const fieldId = `id-${uuid()}`;
 
 			const fieldInfo = writable<FieldInfo>({
@@ -305,91 +311,78 @@
 				fieldSchema: schema?.[field] ?? {}
 			});
 
-			fields = [...fields, fieldInfo];
-
+			// Map.set on a plain object (not Svelte state) - autofixer false positive.
+			fieldsMap.set(field, fieldInfo);
 			return fieldInfo;
 		},
+
 		validate: () => {
-			const stepFields = fields.filter((field) => get(field).step === get(currentStep));
+			const stepFields = Array.from(fieldsMap.values()).filter(
+				(store) => get(store).step === get(currentStep)
+			);
 
 			let valid = true;
 			let hasScrolled = false;
-			stepFields.forEach((field) => {
-				const fieldValid = get(field).fieldApi.validate();
+			for (const store of stepFields) {
+				const fieldValid = get(store).fieldApi.validate();
 				valid = valid && fieldValid;
 				if (!valid && !hasScrolled) {
-					handleScrollToField({ field: get(field) });
+					handleScrollToField({ field: get(store) });
 					hasScrolled = true;
 				}
-			});
+			}
 			return valid;
 		},
+
 		reset: () => {
-			fields.forEach((field) => {
-				get(field).fieldApi.reset();
-			});
+			for (const [, store] of fieldsMap) {
+				get(store).fieldApi.reset();
+			}
 			dispatch('reset');
 		},
-		changeStep: ({
-			type,
-			number
-		}: {
-			type: 'next' | 'prev' | 'first' | 'specific';
-			number: any;
-		}) => {
-			if (type === 'next') {
-				currentStep.update((step) => step + 1);
-			} else if (type === 'prev') {
-				currentStep.update((step) => Math.max(1, step - 1));
-			} else if (type === 'first') {
-				currentStep.set(1);
-			} else if (type === 'specific' && number && !isNaN(number)) {
-				currentStep.set(parseInt(number));
-			}
+
+		changeStep: ({ type, number }: { type: 'next' | 'prev' | 'first' | 'specific'; number: any }) => {
+			if (type === 'next') currentStep.update((s) => s + 1);
+			else if (type === 'prev') currentStep.update((s) => Math.max(1, s - 1));
+			else if (type === 'first') currentStep.set(1);
+			else if (type === 'specific' && number && !isNaN(number)) currentStep.set(parseInt(number));
 		},
+
 		setStep: (step: number) => {
-			if (step) {
-				currentStep.set(step);
-			}
+			if (step) currentStep.set(step);
 		},
+
 		setFieldValue: (fieldName: string, value: any) => {
-			const field = getField(fieldName);
-			if (!field) {
-				return;
-			}
-			const { fieldApi } = get(field);
-			fieldApi.setValue(value);
+			const field = getFieldStore(fieldName);
+			if (!field) return;
+			get(field).fieldApi.setValue(value);
 		},
+
 		resetField: (fieldName: string) => {
-			const field = getField(fieldName);
-			if (!field) {
-				return;
-			}
-			const { fieldApi } = get(field);
-			fieldApi.reset();
+			const field = getFieldStore(fieldName);
+			if (!field) return;
+			get(field).fieldApi.reset();
 		},
+
 		acceptChanges: () => {
-			fields.forEach((fieldStore) => {
-				fieldStore.update((state) => {
+			for (const [, store] of fieldsMap) {
+				store.update((state) => {
 					state.fieldState.initialValue = state.fieldState.value;
 					state.fieldState.dirty = false;
 					return state;
 				});
-			});
+			}
 		}
 	};
 
 	const makeFieldApi = (field: string) => {
 		const setValue = (value: any, skipCheck = false) => {
-			const fieldInfo = getField(field);
-			const { fieldState } = get(fieldInfo);
-			const { validator } = fieldState;
+			const fieldInfo = getFieldStore(field)!;
+			const fieldState = get(fieldInfo).fieldState;
 
-			if (!skipCheck && fieldState.value === value) {
-				return false;
-			}
+			if (!skipCheck && fieldState.value === value) return false;
 
-			const error = validator?.(value);
+			const error = fieldState.validator?.(value);
 			fieldInfo.update((state) => {
 				state.fieldState.value = value;
 				state.fieldState.error = error;
@@ -402,10 +395,8 @@
 		};
 
 		const reset = () => {
-			const fieldInfo = getField(field);
-			const { fieldState } = get(fieldInfo);
-			const newValue = fieldState.initialValue;
-
+			const fieldInfo = getFieldStore(field)!;
+			const newValue = get(fieldInfo).fieldState.initialValue;
 			fieldInfo.update((state) => {
 				state.fieldState.value = newValue;
 				state.fieldState.error = null;
@@ -416,7 +407,8 @@
 		};
 
 		const deregister = () => {
-			const fieldInfo = getField(field);
+			const fieldInfo = getFieldStore(field);
+			if (!fieldInfo) return;
 			fieldInfo.update((state) => {
 				state.fieldState.validator = null;
 				state.fieldState.error = null;
@@ -425,7 +417,8 @@
 		};
 
 		const setDisabled = (fieldDisabled: boolean) => {
-			const fieldInfo = getField(field);
+			const fieldInfo = getFieldStore(field);
+			if (!fieldInfo) return;
 			fieldInfo.update((state) => {
 				state.fieldState.fieldDisabled = fieldDisabled;
 				const isAutoColumn = !!schema?.[state.name]?.autocolumn;
@@ -435,28 +428,24 @@
 		};
 
 		const setReadOnly = (fieldReadOnly: boolean) => {
-			const fieldInfo = getField(field);
+			const fieldInfo = getFieldStore(field);
+			if (!fieldInfo) return;
 			fieldInfo.update((state) => {
 				state.fieldState.fieldReadOnly = fieldReadOnly;
-				state.fieldState.readonly =
-					readonly || fieldReadOnly || (schema?.[state.name] as any)?.readonly;
+				state.fieldState.readonly = readonly || fieldReadOnly || (schema?.[state.name] as any)?.readonly;
 				return state;
 			});
 		};
 
-		return {
-			setValue,
-			reset,
-			setDisabled,
-			setReadOnly,
-			deregister,
-			validate: () => {
-				const fieldInfo = getField(field);
-				setValue(get(fieldInfo).fieldState.value, true);
-				return !get(fieldInfo).fieldState.error;
-			}
-		};
+		return { setValue, reset, setDisabled, setReadOnly, deregister, validate: () => {
+			const fieldInfo = getFieldStore(field);
+			if (!fieldInfo) return true;
+			setValue(get(fieldInfo).fieldState.value, true);
+			return !get(fieldInfo).fieldState.error;
+		} };
 	};
+
+	// --- Context setup ---------------------------------------------------------
 
 	setContext('form', {
 		formState,
@@ -468,123 +457,75 @@
 
 	setContext('form-step', writable(1));
 
-	// svelte-ignore state_referenced_locally
-	let fieldGroupLabelPosition = $state(labelPosition);
-	// svelte-ignore state_referenced_locally
-	setContext('field-group', fieldGroupLabelPosition);
+	// Use a writable store so setContext receives something that auto-updates.
+	// svelte-ignore state_referenced_locally - writable store propagates reactivity through context; updated via $effect when labelPosition changes.
+	let fieldGroupLabelPositionStore = writable(labelPosition);
+	setContext('field-group', fieldGroupLabelPositionStore);
 
 	$effect(() => {
-		fieldGroupLabelPosition = labelPosition;
+		fieldGroupLabelPositionStore.set(labelPosition);
 	});
 
-	$effect(() => {
-		return currentStep.subscribe((step) => {
-			if (currentStepValue !== step) {
-				currentStepValue = step;
-			}
-		});
-	});
-
-	$effect(() => {
-		const fieldsList = fields;
-		const store = deriveFieldProperty(fieldsList, (f) => f.fieldState.value);
-		return store.subscribe((nextValues) => {
-			untrack(() => {
-				if (!recordsEqual(values, nextValues)) {
-					values = nextValues;
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		const fieldsList = fields;
-		const store = deriveFieldProperty(fieldsList, (f) => f.fieldState.error);
-		return store.subscribe((nextErrors) => {
-			untrack(() => {
-				if (!recordsEqual(errors, nextErrors)) {
-					errors = nextErrors;
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		const fieldsList = fields;
-		const store = deriveBindingEnrichments(fieldsList);
-		return store.subscribe((nextEnrichments) => {
-			untrack(() => {
-				if (!recordsEqual(enrichments, nextEnrichments)) {
-					enrichments = nextEnrichments;
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		const fieldsList = fields;
-		const store = deriveDirtyStatus(fieldsList);
-		return store.subscribe((nextDirty) => {
-			untrack(() => {
-				if (dirty !== nextDirty) {
-					dirty = nextDirty;
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		const fieldsList = fields;
-		const store = derived([currentStep, ...fieldsList], ([currentStepValue, ...fieldsValue]) => {
-			return !fieldsValue
-				.filter((f) => f.step === currentStepValue)
-				.some((f) => f.fieldState.error != null);
-		});
-		return store.subscribe((nextValid) => {
-			untrack(() => {
-				if (currentStepValid !== nextValid) {
-					currentStepValid = nextValid;
-				}
-			});
-		});
-	});
-
-	$effect(() => {
-		values;
-		errors;
-		valid;
-		dirty;
-		currentStepValue;
-		untrack(() => {
-			formState.set({
-				values,
-				errors,
-				valid,
-				dirty,
-				currentStep: currentStepValue,
-				currentStepValid
-			});
-		});
-	});
-
-	$effect(() => {
-		const nextFormValue = deriveFormValue(initialValues, values, enrichments);
-		if (JSON.stringify(formValue) !== JSON.stringify(nextFormValue)) {
-			formValue = nextFormValue;
-		}
-	});
+	// --- Reactive state sync via single effect ---------------------------------
+	// Consolidates the previous 5 separate effects into one that reads from
+	// top-level derived stores and sets formState in a single pass.
 
 	$effect(() => {
 		dataSource;
-		untrack(() => {
-			form = {
-				formState,
-				formApi,
-				dataSource
-			};
+		formState.set({
+			values,
+			errors,
+			valid,
+			dirty,
+			currentStep: currentStepValue,
+			currentStepValid
 		});
 	});
 
+	// --- formValue sync with cheap equality check ------------------------------
+	// Avoids full JSON.stringify + cloneDeep on every field change by tracking
+	// which keys actually differ from the last emitted value.
+	let lastEmittedKeys: Record<string, any> | null = null;
+
+	$effect(() => {
+		const nextFormValue = deriveFormValue(initialValues || {}, values, enrichments);
+
+		if (!lastEmittedKeys) {
+			formValue = nextFormValue;
+			lastEmittedKeys = cloneDeep(nextFormValue);
+			return;
+		}
+
+		let changed = false;
+		const keys = Object.keys(nextFormValue);
+		for (const key of keys) {
+			if (!Object.prototype.hasOwnProperty.call(lastEmittedKeys, key)) {
+				changed = true;
+				break;
+			}
+			if (nextFormValue[key] !== lastEmittedKeys[key]) {
+				changed = true;
+				break;
+			}
+		}
+
+		if (changed) {
+			formValue = nextFormValue;
+			lastEmittedKeys = cloneDeep(nextFormValue);
+		}
+	});
+
+	// --- Guarded form binding to avoid unnecessary parent re-renders -----------
+	let prevDataSourceRef: any = undefined;
+
+	$effect(() => {
+		if (dataSource !== prevDataSourceRef) {
+			prevDataSourceRef = dataSource;
+			form = { formState, formApi, dataSource };
+		}
+	});
+
+	// --- Context + columns setup -----------------------------------------------
 	let dataContext = $derived(
 		buildFormDataContext(formValue, {
 			valid,
@@ -607,48 +548,57 @@
 		fieldGroupColumnsStore.set(normalizedColumns);
 	});
 
+	// Track previous disabled/readonly to detect actual prop changes.
+	let prevDisabled = $state(false);
+	let prevReadonly = $state(false);
+
 	$effect(() => {
 		disabled;
 		readonly;
-		untrack(() => updateFieldStates(disabled, readonly));
+		if (disabled !== prevDisabled || readonly !== prevReadonly) {
+			prevDisabled = disabled;
+			prevReadonly = readonly;
+			untrack(() => updateFieldStates(disabled, readonly));
+		}
 	});
+
+	// --- Initial values sync with structural equality guard ---------------------
+	let prevInitialValues: Record<string, any> | null = null;
 
 	$effect(() => {
 		const rowValues = initialValues;
 		if (!rowValues) return;
 
-		untrack(() => {
-			fields.forEach((fieldStore) => {
-				fieldStore.update((state) => {
-					const loaded = deepGet(rowValues, state.name);
-					if (
-						state.fieldState.dirty ||
-						loaded == null ||
-						loaded === '' ||
-						fieldValuesEqual(state.fieldState.value, loaded)
-					) {
-						return state;
-					}
+		// Skip if initialValues hasn't actually changed.
+		if (prevInitialValues === rowValues) return;
 
-					state.fieldState.value = loaded;
-					state.fieldState.initialValue = loaded;
-					state.fieldState.dirty = false;
-					state.fieldState.lastUpdate = Date.now();
-					return state;
+		untrack(() => {
+			for (const [, store] of fieldsMap) {
+				const state = get(store);
+				const loaded = deepGet(rowValues, state.name);
+				if (
+					state.fieldState.dirty ||
+					loaded == null ||
+					loaded === '' ||
+					fieldValuesEqual(state.fieldState.value, loaded)
+				) continue;
+
+				store.update((s) => {
+					s.fieldState.value = loaded;
+					s.fieldState.initialValue = loaded;
+					s.fieldState.dirty = false;
+					s.fieldState.lastUpdate = Date.now();
+					return s;
 				});
-			});
+			}
 		});
+
+		prevInitialValues = rowValues;
 	});
 
-	const handleUpdateFieldValue = ({
-		type,
-		field,
-		value
-	}: {
-		type: 'set' | 'reset';
-		field: string;
-		value: any;
-	}) => {
+	// --- Action handlers -------------------------------------------------------
+
+	const handleUpdateFieldValue = ({ type, field, value }: { type: 'set' | 'reset'; field: string; value: any }) => {
 		if (type === 'set') {
 			if (field === '_value') {
 				let parsedValue = value;
@@ -656,15 +606,13 @@
 					try {
 						parsedValue = JSON.parse(value);
 					} catch {
-						// Invalid JSON, skip
-						return;
+						return; // Invalid JSON, skip
 					}
 				}
 				if (typeof parsedValue === 'object' && parsedValue !== null) {
-					// Special case: update multiple fields from the value object
 					Object.keys(parsedValue).forEach((key) => {
-						const fieldStore = fields.find(
-							(field) => get(field).name.toLowerCase() === key.toLowerCase()
+						const fieldStore = Array.from(fieldsMap.values()).find(
+							(s) => get(s).name.toLowerCase() === key.toLowerCase()
 						);
 						if (fieldStore) {
 							const actualFieldName = get(fieldStore).name;
@@ -674,7 +622,6 @@
 
 					formApi.validate();
 				}
-				// If not an object, do nothing
 			} else {
 				formApi.setFieldValue(field, value);
 			}
@@ -684,12 +631,13 @@
 	};
 
 	const handleScrollToField = (props: { field: FieldInfo | string }) => {
-		let field;
+		let field: FieldInfo;
 		if (typeof props.field === 'string') {
-			field = get(getField(props.field));
+			field = get(getFieldStore(props.field)!);
 		} else {
 			field = props.field;
 		}
+
 		const fieldId = field.fieldState.fieldId;
 		const fieldElement = document.getElementById(fieldId);
 		if (fieldElement) {
@@ -699,6 +647,14 @@
 		if (label) {
 			label.style.scrollMargin = '100px';
 			label.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			// Clean up the inline style after scroll completes.
+			label.addEventListener(
+				'scrollend',
+				() => {
+					label.style.scrollMargin = '';
+				},
+				{ once: true }
+			);
 		}
 	};
 
@@ -710,22 +666,49 @@
 		{ type: ActionTypes.ScrollTo, callback: handleScrollToField }
 	];
 
-	// Update field disabled/readonly states when props change
+	// Update field disabled/readonly states when props change.
 	const updateFieldStates = (formDisabled: boolean, formReadonly: boolean) => {
-		if (fields.length > 0) {
-			fields.forEach((field) => {
-				field.update((state) => {
-					const isAutoColumn = !!schema?.[state.name]?.autocolumn;
-					state.fieldState.disabled =
-						formDisabled || state.fieldState.fieldDisabled || (isAutoColumn && !editAutoColumns);
-					state.fieldState.readonly =
-						formReadonly ||
-						state.fieldState.fieldReadOnly ||
-						(schema?.[state.name] as any)?.readonly;
-					return state;
-				});
+		if (fieldsMap.size === 0) return;
+
+		for (const [, store] of fieldsMap) {
+			store.update((state) => {
+				const isAutoColumn = !!schema?.[state.name]?.autocolumn;
+				state.fieldState.disabled =
+					formDisabled || state.fieldState.fieldDisabled || (isAutoColumn && !editAutoColumns);
+				state.fieldState.readonly =
+					formReadonly ||
+					state.fieldState.fieldReadOnly ||
+					(schema?.[state.name] as any)?.readonly;
+				return state;
 			});
 		}
+	};
+
+	// Reusable deep-derive helper (kept for compatibility with callers).
+	const deriveFormValue = (
+		initialValues: Record<string, any>,
+		values: Record<string, any>,
+		enrichments: Record<string, string>
+	) => {
+		let formValue = cloneDeep(initialValues);
+		const sortedFields = Object.entries(values || {})
+			.map(([key, value]) => {
+				const fieldStore = fieldsMap.get(key);
+				return {
+					key,
+					value,
+					lastUpdate: fieldStore ? get(fieldStore).fieldState?.lastUpdate || 0 : 0
+				};
+			})
+			.sort((a, b) => a.lastUpdate - b.lastUpdate);
+
+		sortedFields.forEach(({ key, value }) => {
+			deepSet(formValue, key, value);
+		});
+		Object.entries(enrichments || {}).forEach(([key, value]) => {
+			deepSet(formValue, key, value);
+		});
+		return formValue;
 	};
 </script>
 
