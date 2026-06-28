@@ -153,11 +153,10 @@
 		if (raw == null || raw === '') return [];
 
 		if (multi) {
-			return Array.isArray(raw)
-				? raw
-						.map((item) => parseLinkItem(item, primaryDisplayField))
-						.filter((item): item is LinkItem => !!item)
-				: [];
+			const items = Array.isArray(raw) ? raw : [raw];
+			return items
+				.map((item) => parseLinkItem(item, primaryDisplayField))
+				.filter((item): item is LinkItem => !!item);
 		}
 
 		const item = parseLinkItem(raw, primaryDisplayField);

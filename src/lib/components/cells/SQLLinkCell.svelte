@@ -151,15 +151,14 @@
 		if (raw == null || raw === '') return [];
 
 		if (multi) {
-			return Array.isArray(raw)
-				? raw
-						.map((item) =>
-							typeof item === 'object' && item !== null
-								? parseRow(item as Record<string, unknown>, primaryDisplayField)
-								: null
-						)
-						.filter((item): item is SQLLinkItem => !!item)
-				: [];
+			const items = Array.isArray(raw) ? raw : [raw];
+			return items
+				.map((item) =>
+					typeof item === 'object' && item !== null
+						? parseRow(item as Record<string, unknown>, primaryDisplayField)
+						: null
+				)
+				.filter((item): item is SQLLinkItem => !!item);
 		}
 
 		if (typeof raw === 'object' && !Array.isArray(raw)) {
